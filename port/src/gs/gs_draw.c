@@ -1119,7 +1119,7 @@ static GsTex texture_get(int ctx) {
         }
     }
     if (animeFound > animeCount && getenv("BT3_ANIME_LOG") != NULL) {
-        fprintf(stderr, "anime: frame %u: %ux%u %s: %d of %d made here (replaced %d, text %d, pixels %d, size %ux%u, other %d)\n", gGsFrame,
+        fprintf(stderr, "anime: frame %u: %ux%u %s: %d of %d made, try 1 (replaced %d, text %d, pixels %d, size %ux%u, other %d)\n", gGsFrame,
                 (unsigned)tw, (unsigned)th, TexPack_Path(animeIds[0]), animeCount, animeFound, replaced, menuText, px != NULL,
                 (unsigned)rw, (unsigned)rh, animeOther);
     }
