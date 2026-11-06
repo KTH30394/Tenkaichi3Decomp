@@ -703,6 +703,89 @@ static void pack_arrived(Tex *c) {
     gGpuTexReplaced++;
 }
 
+/* The anime colours of a texture (TexPack_LoadAnime) as a texture of the back end, 0 = none. The original's pixels are
+   kept for each (sAnimeOrig): the game repaints a fighter's palettes for a moment (hit, a charged attack: the whole
+   model whiter), which is a texture of its own without anime colours of its own; `other` = this is one of those, found
+   under another palette (TexPack_AnimeOtherPalette). It gets the original's anime colours with what the repaint adds
+   to each texel added to them, so the flash is still seen; only where the repaint is lighter than the original nearly
+   everywhere (another fighter's colours on the same texture are not a flash). */
+static struct { int id; uint32_t w, h; uint32_t *px; } sAnimeOrig[64];
+static unsigned sAnimeOrigNext;
+
+static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, uint32_t h, float *cut) {
+    TexPackImage img;
+    int c = 0, k, slot = -1;
+    uint32_t i, x, y;
+    GsTex tex;
+
+    *cut = 0.0f;
+    for (k = 0; k < 64; k++) {
+        if (sAnimeOrig[k].px != NULL && sAnimeOrig[k].id == id) {
+            slot = k;
+            break;
+        }
+    }
+    if (!other) {
+        if (slot < 0) {
+            slot = (int)(sAnimeOrigNext++ & 63);
+        }
+        if (sAnimeOrig[slot].px == NULL || sAnimeOrig[slot].w != w || sAnimeOrig[slot].h != h) {
+            free(sAnimeOrig[slot].px);
+            sAnimeOrig[slot].px = (uint32_t *)malloc((size_t)w * h * 4);
+            if (sAnimeOrig[slot].px == NULL) {
+                return 0;
+            }
+        }
+        memcpy(sAnimeOrig[slot].px, px, (size_t)w * h * 4);
+        sAnimeOrig[slot].id = id;
+        sAnimeOrig[slot].w = w;
+        sAnimeOrig[slot].h = h;
+    } else {
+        uint32_t darker = 0;
+        const uint8_t *o, *n = (const uint8_t *)px;
+        if (slot < 0 || sAnimeOrig[slot].w != w || sAnimeOrig[slot].h != h) {
+            return 0; /* (the original not seen yet) */
+        }
+        o = (const uint8_t *)sAnimeOrig[slot].px;
+        for (i = 0; i < w * h; i++) {
+            darker += n[i * 4] + 10 < o[i * 4] || n[i * 4 + 1] + 10 < o[i * 4 + 1] || n[i * 4 + 2] + 10 < o[i * 4 + 2];
+        }
+        if (darker > w * h / 20) {
+            return 0;
+        }
+    }
+    if (!TexPack_LoadAnime(id, &img, &c)) {
+        return 0;
+    }
+    if (img.format != GS_TEXFMT_RGBA8 || img.w != w || img.h != 2 * h) {
+        TexPack_Free(&img);
+        return 0;
+    }
+    if (other) {
+        uint8_t *a = (uint8_t *)(uintptr_t)img.data[0];
+        const uint8_t *o = (const uint8_t *)sAnimeOrig[slot].px, *n = (const uint8_t *)px;
+        for (y = 0; y < h; y++) {
+            for (x = 0; x < w; x++) {
+                for (k = 0; k < 3; k++) {
+                    int add = (int)n[(y * w + x) * 4 + k] - (int)o[(y * w + x) * 4 + k], v;
+                    if (add <= 0) {
+                        continue;
+                    }
+                    v = a[(y * w + x) * 4 + k] + add;
+                    a[(y * w + x) * 4 + k] = (uint8_t)(v > 255 ? 255 : v);
+                    v = a[((y + h) * w + x) * 4 + k] + add;
+                    a[((y + h) * w + x) * 4 + k] = (uint8_t)(v > 255 ? 255 : v);
+                }
+            }
+        }
+        img.levels = 1; /* (its smaller copies are of the colours before) */
+    }
+    tex = pack_texture(&img);
+    TexPack_Free(&img);
+    *cut = (float)c / 300.0f; /* (as bt3.look cut: up to a third of the ramp) */
+    return tex;
+}
+
 /* Decoding a texture's rows: a large one is shared among worker threads (and the caller), which only read GS memory
    while the caller waits, so nothing after it changes. When a fight's first effects come, one frame decodes 10 to
    100 new textures; on one thread that was 20 to 30 ms of the frame. BT3_TEX_THREADS=<n>: that many workers (0: none;
@@ -828,7 +911,9 @@ static GsTex texture_get(int ctx) {
     int toonSharp = sToonWanted ? Mods_Look()->shading : 0; /* (a fighter's shading ramp, redrawn: its own copy) */
     int toonCut = toonSharp > 0 ? Mods_Look()->cut : 0;
     float toonEdge = 0.5f, toonDir = 0.0f;
-    int animeId = -1;
+    int animeId = -1, animeOther = -1;
+    GsTex animeTex = 0;
+    float animeCut = 0.0f;
     if (toonSharp > 0) { gen ^= 0x70017000u + (uint32_t)toonSharp * 0x9E3779B1u + (uint32_t)toonCut * 0x85EBCA77u; }
     if (sTexPackOn && TexPack_Count() != 0) {
         gen ^= 0x5BD1E995u; /* with the pack and without it are different textures: switching it takes effect at once */
@@ -894,6 +979,7 @@ static GsTex texture_get(int ctx) {
         int id = TexPack_Lookup(tbp, tbw, psm, tw, th, (uint32_t)((t0 >> 34) & 1), cbp, cpsm, &packMaxAlpha);
         int got = id >= 0 ? TexPack_Get(id, &pack) : -1;
         animeId = sToonWanted ? -1 : TexPack_AnimeLast();
+        animeOther = sToonWanted ? -1 : TexPack_AnimeOtherPalette();
         if (got > 0 && sBackend->texSlotsLeft() >= pack.levels && pack_budget_take(&pack)) {
             replaced = 1;
             gGpuTexReplaced++;
@@ -977,6 +1063,10 @@ static GsTex texture_get(int ctx) {
             rh = sh;
         }
     }
+    if (!replaced && !menuText && px != NULL && rw == tw && rh == th && (animeId >= 0 || animeOther >= 0) &&
+        sBackend->texSlotsLeft() > 1) {
+        animeTex = anime_texture(animeId >= 0 ? animeId : animeOther, animeId < 0, px, tw, th, &animeCut);
+    }
     gGpuTexNs += gpu_now() - tex_t0;
     gDrawTexNs += gpu_now() - tex_t0;
     gDrawNewTex++;
@@ -984,6 +1074,9 @@ static GsTex texture_get(int ctx) {
     t->tex = replaced ? pack_texture(&pack) : sBackend->texCreate(rw, rh, GS_TEXFMT_RGBA8, 1);
     if (t->tex == 0) {
         free(px);
+        if (animeTex != 0) {
+            sBackend->texDestroy(animeTex);
+        }
         return gsWhite;
     }
     if (!replaced) {
@@ -1028,17 +1121,8 @@ static GsTex texture_get(int ctx) {
     sTexAvg[0] = sTexAvg[1] = sTexAvg[2] = 1.0f;
     t->toonEdge = toonEdge;
     t->toonDir = toonDir;
-    t->anime = 0;
-    t->animeCut = 0.0f;
-    if (animeId >= 0 && sBackend->texSlotsLeft() > 0) {
-        TexPackImage img;
-        int cut = 0;
-        if (TexPack_LoadAnime(animeId, &img, &cut)) {
-            t->anime = pack_texture(&img);
-            t->animeCut = (float)cut / 300.0f; /* (as bt3.look cut: up to a third of the ramp) */
-            TexPack_Free(&img);
-        }
-    }
+    t->anime = animeTex;
+    t->animeCut = animeCut;
     return t->tex;
 }
 

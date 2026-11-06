@@ -58,6 +58,8 @@ static size_t sHeldBytes, sBudget;
 static unsigned sTick;
 static int sSync = -1;
 static int sAnimeLast = -1; /* the .anime.png the last TexPack_Lookup found, or -1 */
+static int sAnimeAny = -1;  /* without one: an .anime.png of the same texture under another palette, or -1 */
+static uint32_t *sAnimeIds, sAnimeCount; /* the .anime.png entries */
 
 static uint32_t bucket_of(uint64_t tex, uint64_t clut, uint32_t bits) {
     uint64_t h = (tex ^ (clut * 0x9E3779B97F4A7C15ull) ^ bits) * 0x9FB21C651E98DF25ull;
@@ -180,6 +182,10 @@ void TexPack_Init(void) {
             h = (h + 1) & (sBuckets - 1);
         }
         sBucket[h] = i + 1;
+        if (e->anime) {
+            sAnimeIds = realloc(sAnimeIds, (sAnimeCount + 1) * sizeof(uint32_t));
+            sAnimeIds[sAnimeCount++] = i;
+        }
     }
     fprintf(stderr, "bt3: texture pack: %u replacement textures in %s (%u more with a name already seen)\n", sCount - dup, root, dup);
 }
@@ -200,6 +206,7 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
 
     *maxAlpha = 255;
     sAnimeLast = -1;
+    sAnimeAny = -1;
     if (sCount == 0) {
         return -1;
     }
@@ -264,6 +271,13 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
         sAnimeLast = find(tex, XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, 1, 1);
         if (sAnimeLast < 0) {
             sAnimeLast = find(tex, XXH3_64bits(clut, count * 4), bits, 1, 1);
+        }
+        for (i = 0; sAnimeLast < 0 && i < sAnimeCount; i++) { /* (the game repaints the palette for a moment: a hit) */
+            const Entry *e = &sEntries[sAnimeIds[i]];
+            if (e->tex == tex && e->bits == bits && e->pal) {
+                sAnimeAny = (int)sAnimeIds[i];
+                break;
+            }
         }
         if (getenv("BT3_TEX_LOG") != NULL) { /* which textures a pack has and which it has not, by the name it would need */
             fprintf(stderr, "texpack: %s %ux%u %u-bit %llx-%llx-%08x%s%s\n", id >= 0 ? "found  " : "missing", tw, th, psm == 0x13 ? 8u : 4u,
@@ -414,6 +428,10 @@ static void image_free(TexPackImage *img) {
 
 int TexPack_AnimeLast(void) {
     return sAnimeLast;
+}
+
+int TexPack_AnimeOtherPalette(void) {
+    return sAnimeAny;
 }
 
 /* Read at once (they are few and small), and not kept: the caller makes its texture and lets go (TexPack_Free).
