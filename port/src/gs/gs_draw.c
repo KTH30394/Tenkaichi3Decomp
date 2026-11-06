@@ -253,6 +253,8 @@ typedef struct Tex {
     float animeCut;          /* and how far its edge moves towards the shadow side (anime_cut.txt), along the ramp */
     float toonEdge, toonDir; /* a shading ramp redrawn (toon_sharpen): where its edge is (0..1 along it), and 1 if the lit
                                 side is past the edge, -1 if before it; 0 = not one */
+    int toonWhy;             /* (BT3_ANIME_LOG) asked for as a ramp: 1 redrawn; not: 2 shading off, 3 a pack's, 4 taken as
+                                text, 5 no pixels; 0 = not asked for as one */
 } Tex;
 static Tex sTex[MAX_TEX];
 static uint16_t sTexBucket[TEX_BUCKETS]; /* index + 1 of a cache entry, 0 = empty (open addressing) */
@@ -754,15 +756,42 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
             return 0;
         }
     }
-    if (!TexPack_LoadAnime(id, &img, &c)) {
-        return 0;
+    {   /* the file read once (the repaints come every frame while a flash lasts: read each time, the game crawled) */
+        static struct { int id, cut; TexPackImage img; } held[64];
+        static unsigned next;
+        int found = -1;
+        for (k = 0; k < 64; k++) {
+            if (held[k].img.file != NULL && held[k].id == id) {
+                found = k;
+                break;
+            }
+        }
+        if (found < 0) {
+            found = (int)(next++ & 63);
+            if (held[found].img.file != NULL) {
+                TexPack_Free(&held[found].img);
+            }
+            if (!TexPack_LoadAnime(id, &held[found].img, &held[found].cut)) {
+                held[found].img.file = NULL;
+                return 0;
+            }
+            held[found].id = id;
+        }
+        img = held[found].img;
+        c = held[found].cut;
     }
     if (img.format != GS_TEXFMT_RGBA8 || img.w != w || img.h != 2 * h) {
-        TexPack_Free(&img);
         return 0;
     }
     if (other) {
-        uint8_t *a = (uint8_t *)(uintptr_t)img.data[0];
+        /* (a copy: the one held stays the original's) */
+        uint8_t *a = (uint8_t *)malloc((size_t)w * h * 2 * 4);
+        if (a == NULL) {
+            return 0;
+        }
+        memcpy(a, img.data[0], (size_t)w * h * 2 * 4);
+        img.data[0] = a;
+        img.bytes[0] = w * h * 2 * 4;
         const uint8_t *o = (const uint8_t *)sAnimeOrig[slot].px, *n = (const uint8_t *)px;
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
@@ -779,9 +808,11 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
             }
         }
         img.levels = 1; /* (its smaller copies are of the colours before) */
+        tex = pack_texture(&img);
+        free(a);
+    } else {
+        tex = pack_texture(&img);
     }
-    tex = pack_texture(&img);
-    TexPack_Free(&img);
     *cut = (float)c / 300.0f; /* (as bt3.look cut: up to a third of the ramp) */
     return tex;
 }
@@ -1121,6 +1152,7 @@ static GsTex texture_get(int ctx) {
     sTexAvg[0] = sTexAvg[1] = sTexAvg[2] = 1.0f;
     t->toonEdge = toonEdge;
     t->toonDir = toonDir;
+    t->toonWhy = !sToonWanted ? 0 : toonDir != 0.0f ? 1 : toonSharp <= 0 ? 2 : replaced ? 3 : menuText ? 4 : 5;
     t->anime = animeTex;
     t->animeCut = animeCut;
     return t->tex;
@@ -2321,34 +2353,25 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         return;
     }
     sToonWanted = 0;
-    if (getenv("BT3_ANIME_LOG") != NULL && layer != 0 && sAnimeStrip.vertices == vertices &&
-        !(layer == 5 || (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f))) {
-        /* (what follows a strip with anime colours, where it is not the usual: which layer, its texture, whether it
-           is a redrawn ramp) */
-        fprintf(stderr, "anime: frame %u layer %d tex0 %016llx tex %s ramp %s target %d alpha %02x\n", gGsFrame, layer,
-                (unsigned long long)(gGs.tex0[ctx] & 0x1FFFFFFFFFFFFFFFull),
-                sLast != NULL && sLast->tex == d.tex ? "cached" : "other",
-                sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f ? "redrawn" : "not redrawn", d.tex_is_target,
-                (unsigned)(gGs.alpha[ctx] & 0xFF));
-    }
-    if (getenv("BT3_ANIME_LOG") != NULL) { /* (per frame: layer 0 strips, those with anime colours, anime passes drawn) */
-        static unsigned frame, strips, anime, passes, l1, l5, other;
+    if (getenv("BT3_ANIME_LOG") != NULL) { /* (per frame: layer 0 strips, those with anime colours, their ramps by why) */
+        static unsigned frame, strips, anime, why[6];
         if (frame != gGsFrame) {
             if (strips != 0) {
-                fprintf(stderr, "anime: frame %u: %u strips, %u with anime colours, %u anime passes; layer 1 %u, 5 %u, other %u\n", frame,
-                        strips, anime, passes, l1, l5, other);
+                fprintf(stderr, "anime: frame %u: shading %d, %u strips, %u with anime colours; their ramps: %u redrawn, "
+                        "not: %u shading off, %u pack, %u text, %u no pixels, %u other\n", frame, Mods_Look()->shading, strips,
+                        anime, why[1], why[2], why[3], why[4], why[5], why[0]);
             }
             frame = gGsFrame;
-            strips = anime = passes = l1 = l5 = other = 0;
+            strips = anime = 0;
+            memset(why, 0, sizeof(why));
         }
         if (layer == 0) {
             strips++;
             anime += sLast != NULL && sLast->tex == d.tex && sLast->anime != 0;
         }
-        l1 += layer == 1;
-        l5 += layer == 5;
-        other += layer != 0 && layer != 1 && layer != 5;
-        passes += layer == 1 || layer == 5 ? (sAnimeStrip.vertices == vertices) : 0;
+        if (layer == 1 && sAnimeStrip.vertices == vertices) {
+            why[sLast != NULL && sLast->tex == d.tex && sLast->toonWhy >= 1 && sLast->toonWhy <= 5 ? sLast->toonWhy : 0]++;
+        }
     }
     if (layer == 0 && sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->anime != 0) {
         sAnimeStrip.vertices = vertices;
