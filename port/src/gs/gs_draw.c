@@ -2231,9 +2231,35 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     sToonWanted = layer == 1; /* (the shading ramp: toon_sharpen) */
     if (!draw_state(ctx, 0, 0, 1, &d, &us, &vs)) {
         sToonWanted = 0;
+        if (getenv("BT3_ANIME_LOG") != NULL && layer != 0 && sAnimeStrip.vertices == vertices) {
+            fprintf(stderr, "anime: frame %u layer %d after an anime strip: not drawn (draw_state)\n", gGsFrame, layer);
+        }
         return;
     }
     sToonWanted = 0;
+    if (getenv("BT3_ANIME_LOG") != NULL && layer != 0 && sAnimeStrip.vertices == vertices) {
+        /* (what follows a strip with anime colours: which layer, its texture, whether it is a redrawn ramp) */
+        fprintf(stderr, "anime: frame %u layer %d tex0 %016llx tex %s ramp %s target %d alpha %02x\n", gGsFrame, layer,
+                (unsigned long long)(gGs.tex0[ctx] & 0x1FFFFFFFFFFFFFFFull),
+                sLast != NULL && sLast->tex == d.tex ? "cached" : "other",
+                sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f ? "redrawn" : "not redrawn", d.tex_is_target,
+                (unsigned)(gGs.alpha[ctx] & 0xFF));
+    }
+    if (getenv("BT3_ANIME_LOG") != NULL) { /* (per frame: layer 0 strips, those with anime colours, anime passes drawn) */
+        static unsigned frame, strips, anime, passes;
+        if (frame != gGsFrame) {
+            if (strips != 0) {
+                fprintf(stderr, "anime: frame %u: %u strips, %u with anime colours, %u passes\n", frame, strips, anime, passes);
+            }
+            frame = gGsFrame;
+            strips = anime = passes = 0;
+        }
+        if (layer == 0) {
+            strips++;
+            anime += sLast != NULL && sLast->tex == d.tex && sLast->anime != 0;
+        }
+        passes += layer == 1 || layer == 5 ? (sAnimeStrip.vertices == vertices) : 0;
+    }
     if (layer == 0 && sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->anime != 0) {
         sAnimeStrip.vertices = vertices;
         sAnimeStrip.count = count;
