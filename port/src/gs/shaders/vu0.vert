@@ -19,7 +19,7 @@ layout(set = 1, binding = 0) uniform U {
     mat4 screen;         // 14..17
     vec4 light;          // xyz: the x components of 10..12, w: of 13
     vec4 color0, color1; // 22, 23 (0..255)
-    vec4 misc;           // x, y: XYOFFSET in pixels, z: depth maximum, w: layer (0 or 1; 2 = programs 2a / 2b; 3 = program 8; 4 = program 7; 5 = program 1 layer 1; 6 = the rim light; 7 = the anime pass)
+    vec4 misc;           // x, y: XYOFFSET in pixels, z: depth maximum, w: layer (0 or 1; 2 = programs 2a / 2b; 3 = program 8; 4 = program 7; 5 = program 1 layer 1; 6 = the rim light; 7, 8, 9 = the anime pass after programs 0, 1, 8)
     vec4 light2;         // program 1: the y components of 10..13
     vec4 target;         // x: GS pixels per texel of the target (gs_draw.c target_lowres; 0 = 1)
 } u;
@@ -59,6 +59,12 @@ void main() {
         float a = clamp(edge * (0.35 + 0.65 * lit) * u.light2.w, 0.0, 1.0);
         vColor = vec4(u.light2.rgb / 255.0, a * 128.0 / 255.0); // (alpha as the GS has it: 0x80 = 1)
         vStq = vec3(0.0, 0.0, 1.0);
+    } else if (u.misc.w == 9.0) {
+        // the anime pass of program 8 (cloth lit in its vertex colours): r = their brightness (0x80 = 0.5), g = 1 for
+        // gs.frag's grey, a = the vertex's alpha, as program 8 has it
+        vec4 c = clamp(floor(inNormal), 0.0, 255.0);
+        vColor = vec4(clamp(dot(c.rgb, vec3(0.299, 0.587, 0.114)) / 256.0, 0.0, 1.0), 128.0 / 255.0, 0.0, c.a / 255.0);
+        vStq = vec3(inSt.xy, 1.0);
     } else if (u.misc.w == 8.0) {
         // the anime pass of program 1 (the hair): where this point is on its second texture's lookup (layer 5's u)
         vColor = vec4(clamp(dot(u.light, vec4(inNormal.xyz, 1.0)) * 0.5 + 0.5, 0.0, 1.0),

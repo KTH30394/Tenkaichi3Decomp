@@ -29,15 +29,18 @@ int TexPack_Get(int id, TexPackImage *img);
 /* Anime colours (gs_draw.c, the fighters' anime pass): "<name>.anime.png" beside the pack's names, twice the texture's
    height, its top half the colour of each texel where the light falls, its bottom half where it does not; alpha 0
    where the game's own shading is kept. The same name may be in several folders: forms of a fighter that share their
-   textures (Goku and his Super Saiyan forms), told apart by their shading ramps (anime_ramps.txt in the folder: the
-   ramp hashes it is for, one a line; without it, for any).
+   textures (Goku and his Super Saiyan forms). A folder with "anime_form.txt" is a form: its colours go on the shared
+   textures only while one of the textures it lists (their hashes, one a line: what only that form has, its hair, its
+   face) is being drawn; a folder without it is for any fighter that has those textures.
    TexPack_AnimeFind: those for the texture of the last TexPack_Lookup, at most `max` (one a folder); none: those of the
    same texture under another palette (the game repaints a fighter's palettes for a moment when hit or charging),
-   *other = 1. TexPack_AnimeRamps: the ramps one is for (0 = any). TexPack_LoadAnime reads it now (1 = read; let go
-   with TexPack_Free). *cut: from "anime_cut.txt" in its folder (one number, 0..100), how far that character's edge
-   between light and shadow moves towards the shadow side. */
+   *other = 1. TexPack_AnimeFolder: one's folder; TexPack_AnimeFolderIsForm, TexPack_AnimeIsMarker: as above.
+   TexPack_LoadAnime reads it now (1 = read; let go with TexPack_Free). *cut: from "anime_cut.txt" in its folder (one
+   number, 0..100), how far that character's edge between light and shadow moves towards the shadow side. */
 int TexPack_AnimeFind(int *ids, int max, int *other);
-int TexPack_AnimeRamps(int id, const uint32_t **ramps);
+int TexPack_AnimeFolder(int id);
+int TexPack_AnimeFolderIsForm(int folder);
+int TexPack_AnimeIsMarker(int id);
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
 void TexPack_Free(TexPackImage *img);
 

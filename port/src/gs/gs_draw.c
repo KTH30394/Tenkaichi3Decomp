@@ -2348,8 +2348,8 @@ void GsGpu_DrawVu4(int ctx, const float *vertices, uint32_t count, const float *
    model's own texture coordinates, its lit colour where the strip faces the light past the redrawn ramp's edge
    (Tex.toonEdge) and its shadow colour elsewhere (shaders/vu0.vert layer 7, gs.frag mode 4). Where the anime
    texture's alpha is 0, what the game drew stays. Layer 0 leaves here what layer 1 of the same strip needs.
-   With several forms of a fighter on one texture, the one whose ramps (anime_ramps.txt) have this strip's ramp is
-   taken, else one for any ramp; the hair (program 1, no ramp) takes the form of the strips before it. */
+   With several forms of a fighter on one texture: anime_form. Also after program 8's strips (cloth lit in its vertex
+   colours, no second layer), cut by their brightness. */
 static struct {
     const float *vertices;
     uint32_t count;
@@ -2359,47 +2359,38 @@ static struct {
     int forms;
     int sampler;
 } sAnimeStrip;
-static uint32_t sAnimeRamp; /* the ramp of the last strip drawn with anime colours (for the hair after it) */
 
-/* Which of the strip's forms is for ramp `ramp`: the index, or -1. A form's ramps need not be under every strip: Goku's
-   Super Saiyan forms keep his own ramps on part of the body and have ramps of their own only on others (face, hair).
-   So a form one of whose ramps was drawn in this frame or the one before is the form of every strip that has it (a
-   fighter is one form at a time; the same fighter in two forms on the screen at once would take one of them). */
-static struct { const uint32_t *list; unsigned frame; } sFormSeen[16];
+/* Which of the strip's forms to draw: the index, or -1. A form (TexPack_AnimeFolderIsForm) one of whose own textures
+   (its hair, its face: TexPack_AnimeIsMarker) was drawn in the last half second is the form of every strip that has it
+   (a fighter is one form at a time; the same fighter in two forms on the screen at once would take one of them; the
+   half second: a frame without the hair, or a blink, does not switch the colours off and on). Else a folder for any. */
+#define ANIME_FORM_HOLD 30
+static struct { int folder; unsigned frame; } sFormSeen[16];
 
-static int anime_form(uint32_t ramp) {
-    int f, k, s, any = -1;
+static int anime_form(void) {
+    int f, s, any = -1;
     for (f = 0; f < sAnimeStrip.forms; f++) {
-        const uint32_t *list;
-        int n = TexPack_AnimeRamps(sAnimeStrip.entry[f], &list);
-        if (n == 0 && any < 0) {
-            any = f;
-        }
-        for (k = 0; k < n; k++) {
-            if (list[k] == ramp) {
-                int free_slot = 0;
-                for (s = 0; s < 16; s++) {
-                    if (sFormSeen[s].list == list) {
-                        break;
-                    }
-                    if (sFormSeen[s].frame < sFormSeen[free_slot].frame) {
-                        free_slot = s;
-                    }
+        if (TexPack_AnimeIsMarker(sAnimeStrip.entry[f])) {
+            int folder = TexPack_AnimeFolder(sAnimeStrip.entry[f]), oldest = 0;
+            for (s = 0; s < 16 && sFormSeen[s].folder != folder + 1; s++) {
+                if (sFormSeen[s].frame < sFormSeen[oldest].frame) {
+                    oldest = s;
                 }
-                s = s < 16 ? s : free_slot;
-                sFormSeen[s].list = list;
-                sFormSeen[s].frame = gGsFrame;
-                return f;
             }
+            s = s < 16 ? s : oldest;
+            sFormSeen[s].folder = folder + 1;
+            sFormSeen[s].frame = gGsFrame;
+            return f;
         }
     }
     for (f = 0; f < sAnimeStrip.forms; f++) {
-        const uint32_t *list;
-        if (TexPack_AnimeRamps(sAnimeStrip.entry[f], &list) == 0) {
+        int folder = TexPack_AnimeFolder(sAnimeStrip.entry[f]);
+        if (!TexPack_AnimeFolderIsForm(folder)) {
+            any = any < 0 ? f : any;
             continue;
         }
         for (s = 0; s < 16; s++) {
-            if (sFormSeen[s].list == list && sFormSeen[s].frame + 1 >= gGsFrame) {
+            if (sFormSeen[s].folder == folder + 1 && sFormSeen[s].frame + ANIME_FORM_HOLD >= gGsFrame) {
                 return f;
             }
         }
@@ -2416,14 +2407,14 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     Vu0Uniform u;
     GsDraw d, *last;
     float us, vs, rampEdge = -1.0f, rampDir = 0.0f;
-    uint32_t i, k, ramp = 0;
-    int haveRamp = 0, form = -1;
+    uint32_t i, k;
+    int form = -1;
 
     if (count < 3 || gsVuVertCount + count > MAX_VU_VERTS || gsVuIdxCount + (count - 2) * 3 > MAX_VU_IDX || gsDrawCount == MAX_DRAWS ||
         gsVuUniCount == MAX_VU_UNIFORMS) {
         return;
     }
-    if (layer == 0) {
+    if (layer == 0 || layer == 3) {
         sAnimeStrip.vertices = NULL;
     }
     sToonWanted = layer == 1; /* (the shading ramp: toon_sharpen) */
@@ -2497,7 +2488,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             }
         }
     }
-    if (layer == 0 && sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->animeCount != 0) {
+    if ((layer == 0 || layer == 3) && sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->animeCount != 0) {
         int f;
         sAnimeStrip.vertices = vertices;
         sAnimeStrip.count = count;
@@ -2512,11 +2503,13 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     if (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f) {
         rampEdge = sLast->toonEdge;
         rampDir = sLast->toonDir;
-        ramp = sLast->rampHash;
-        haveRamp = 1;
     }
     if (layer == 5) { /* program 1 (the hair): no ramp; the anime pass cuts its lookup in the middle */
         rampEdge = 0.5f;
+        rampDir = -1.0f;
+    }
+    if (layer == 3) { /* program 8 (cloth lit in its vertex colours): the anime pass cuts their brightness (vu0.vert layer 9) */
+        rampEdge = 0.4f;
         rampDir = -1.0f;
     }
     if (layer == 2 && d.misc[1] == 1.0f && d.misc[2] != 0.0f) {
@@ -2568,22 +2561,24 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     gsVuUni[gsVuUniCount++] = u;
     gsDraws[gsDrawCount++] = d;
     /* The anime pass (sAnimeStrip above): this strip's shading layer, with its layer 0 carrying anime colours. */
-    if ((layer == 1 || layer == 5) && sAnimeStrip.vertices == vertices && sAnimeStrip.count == count && sAnimeStrip.forms > 0) {
-        form = anime_form(haveRamp ? ramp : sAnimeRamp);
-        if (haveRamp && form >= 0) {
-            sAnimeRamp = ramp;
-        }
+    if ((layer == 1 || layer == 5 || layer == 3) && sAnimeStrip.vertices == vertices && sAnimeStrip.count == count &&
+        sAnimeStrip.forms > 0) {
+        form = anime_form();
     }
-    if ((layer == 1 || layer == 5) && rampDir != 0.0f && form >= 0 && Mods_Look()->shading > 0 && gsDrawCount < MAX_DRAWS &&
-        gsVuUniCount < MAX_VU_UNIFORMS) {
+    if ((layer == 1 || layer == 5 || layer == 3) && rampDir != 0.0f && form >= 0 && Mods_Look()->shading > 0 &&
+        gsDrawCount < MAX_DRAWS && gsVuUniCount < MAX_VU_UNIFORMS) {
         GsDraw a = d;
         Vu0Uniform au = u;
-        uint64_t prim = gGs.prim, zbuf = gGs.zbuf[ctx];
+        uint64_t prim = gGs.prim, zbuf = gGs.zbuf[ctx], frame = gGs.frame[ctx];
         gGs.prim = prim & ~(1ull << 6);      /* (no blending: the colour replaces what is there) */
         gGs.zbuf[ctx] = zbuf | (1ull << 32); /* (depth not written) */
+        /* (nor the alpha: the game keeps which part of a model each pixel is in it, and its outline pass draws the
+           lines between parts from that, between one lock of hair and the next; written over, they were lost) */
+        gGs.frame[ctx] = frame | (0xFF000000ull << 32);
         a.pipeline = pipeline_get(ctx, 0, 1, 0);
         gGs.prim = prim;
         gGs.zbuf[ctx] = zbuf;
+        gGs.frame[ctx] = frame;
         a.tex = sAnimeStrip.anime[form];
         a.tex_is_target = 0;
         /* (sampled as the game samples layer 0, so its line art stays as sharp; clamped in v, gs.frag wraps it by
@@ -2597,7 +2592,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
            (seen on Goku SSJ3: with the sign of toonDir as it is, the shadow fell on the side facing the light). */
         a.orig[0] = -rampDir;
         a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
-        au.misc[3] = layer == 5 ? 8.0f : 7.0f;
+        au.misc[3] = layer == 5 ? 8.0f : layer == 3 ? 9.0f : 7.0f;
         a.uniform = (int)gsVuUniCount;
         gsVuUni[gsVuUniCount++] = au;
         gsDraws[gsDrawCount++] = a;

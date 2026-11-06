@@ -63,9 +63,10 @@ static int sSync = -1;
 static uint32_t *sAnimeIds, sAnimeCount;
 typedef struct AnimeFolder {
     char *dir;
-    int cut;          /* anime_cut.txt */
-    uint32_t *ramps;  /* anime_ramps.txt: the shading ramps (TexPack_AnimeRamps) this folder's colours are for */
-    int rampCount;
+    int cut;           /* anime_cut.txt */
+    int form;          /* anime_form.txt is there: a form of a fighter (TexPack_AnimeFolderIsForm) */
+    uint64_t *markers; /* and the texture hashes in it: textures only that form has (TexPack_AnimeIsMarker) */
+    int markerCount;
 } AnimeFolder;
 static AnimeFolder *sFolders;
 static int sFolderCount;
@@ -95,16 +96,17 @@ static int folder_of(const char *dir) {
         }
         fclose(f);
     }
-    snprintf(path, sizeof(path), "%sanime_ramps.txt", dir); /* one hexadecimal number a line; anything after it ignored */
+    snprintf(path, sizeof(path), "%sanime_form.txt", dir); /* one texture hash a line (hexadecimal); anything after it ignored */
     f = fopen(path, "r");
     if (f != NULL) {
         char line[256];
+        a->form = 1;
         while (fgets(line, sizeof(line), f) != NULL) {
             char *end;
-            unsigned long v = strtoul(line, &end, 16);
+            unsigned long long v = strtoull(line, &end, 16);
             if (end != line) {
-                a->ramps = realloc(a->ramps, (size_t)(a->rampCount + 1) * sizeof(uint32_t));
-                a->ramps[a->rampCount++] = (uint32_t)v;
+                a->markers = realloc(a->markers, (size_t)(a->markerCount + 1) * sizeof(uint64_t));
+                a->markers[a->markerCount++] = (uint64_t)v;
             }
         }
         fclose(f);
@@ -509,13 +511,25 @@ int TexPack_AnimeFind(int *ids, int max, int *other) {
     return n;
 }
 
-int TexPack_AnimeRamps(int id, const uint32_t **ramps) {
-    *ramps = NULL;
-    if (id < 0 || (uint32_t)id >= sCount || !sEntries[id].anime) {
+int TexPack_AnimeFolder(int id) {
+    return id >= 0 && (uint32_t)id < sCount && sEntries[id].anime ? sEntries[id].folder : -1;
+}
+
+int TexPack_AnimeFolderIsForm(int folder) {
+    return folder >= 0 && folder < sFolderCount && sFolders[folder].form;
+}
+
+int TexPack_AnimeIsMarker(int id) {
+    int folder = TexPack_AnimeFolder(id), k;
+    if (folder < 0) {
         return 0;
     }
-    *ramps = sFolders[sEntries[id].folder].ramps;
-    return sFolders[sEntries[id].folder].rampCount;
+    for (k = 0; k < sFolders[folder].markerCount; k++) {
+        if (sFolders[folder].markers[k] == sEntries[id].tex) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* Read at once (they are few and small), and not kept: the caller makes its texture and lets go (TexPack_Free).
