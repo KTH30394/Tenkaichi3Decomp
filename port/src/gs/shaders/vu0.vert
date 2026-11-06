@@ -19,7 +19,7 @@ layout(set = 1, binding = 0) uniform U {
     mat4 screen;         // 14..17
     vec4 light;          // xyz: the x components of 10..12, w: of 13
     vec4 color0, color1; // 22, 23 (0..255)
-    vec4 misc;           // x, y: XYOFFSET in pixels, z: depth maximum, w: layer (0 or 1; 2 = programs 2a / 2b; 3 = program 8; 4 = program 7; 5 = program 1 layer 1; 6 = the rim light)
+    vec4 misc;           // x, y: XYOFFSET in pixels, z: depth maximum, w: layer (0 or 1; 2 = programs 2a / 2b; 3 = program 8; 4 = program 7; 5 = program 1 layer 1; 6 = the rim light; 7 = the anime pass)
     vec4 light2;         // program 1: the y components of 10..13
     vec4 target;         // x: GS pixels per texel of the target (gs_draw.c target_lowres; 0 = 1)
 } u;
@@ -59,6 +59,14 @@ void main() {
         float a = clamp(edge * (0.35 + 0.65 * lit) * u.light2.w, 0.0, 1.0);
         vColor = vec4(u.light2.rgb / 255.0, a * 128.0 / 255.0); // (alpha as the GS has it: 0x80 = 1)
         vStq = vec3(0.0, 0.0, 1.0);
+    } else if (u.misc.w == 7.0) {
+        // PC only (gs_draw.c, the anime pass): the model's own texture coordinates, and in vColor what gs.frag mode 4
+        // needs: r = where on the shading ramp this point is (layer 1's u), g = the material colour (22, as grey),
+        // a = layer 1's alpha (23)
+        float na = dot(u.light.xyz, mat3(u.boneA) * inNormal.xyz), nb = dot(u.light.xyz, mat3(u.boneB) * inNormal.xyz);
+        vColor = vec4(clamp((mix(nb, na, w) + u.light.w) * 0.5 + 0.5, 0.0, 1.0), (u.color0.r + u.color0.g + u.color0.b) / 765.0, 0.0,
+                      u.color1.a / 255.0);
+        vStq = vec3(inSt.xy, 1.0);
     } else if (u.misc.w >= 3.0) {
         // programs 8 and 7: the colour of each vertex (0..255 floats in the second quadword); 7 takes the mesh's alpha
         vColor = clamp(floor(vec4(inNormal.rgb, u.misc.w == 4.0 ? u.color0.a : inNormal.a)), 0.0, 255.0) / 255.0;

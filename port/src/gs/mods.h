@@ -115,10 +115,15 @@ int Mods_HudHidden(void);                     /* any thread: the game's HUD piec
    energy:       what adds light (ki blasts, beams, sparks) drawn stronger and more saturated
    energy_light: that light tinting the ground, rocks and fighters round it
    vivid, ambient and energy_light are one pass over the picture before the HUD, drawn only by the renderer of SDL's
-   GPU API outside Windows (gs_gpu.c); the others by every renderer. */
+   GPU API outside Windows (gs_gpu.c); the others by every renderer.
+   cut:          with shading, the edge between light and shadow moved towards the shadow side (more of the model
+                 lit; 0 = where the shading puts it)
+   A fighter's texture with anime colours in the texture pack (gs_texpack.h, <name>.anime.png) is drawn with them on
+   either side of that edge, with shading on. */
 typedef struct ModsLook {
     int shading, rim, vivid, ambient, energy, energy_light;
     unsigned rim_color;
+    int cut;
 } ModsLook;
 const ModsLook *Mods_Look(void);
 

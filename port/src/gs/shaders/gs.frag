@@ -57,7 +57,19 @@ void main() {
     }
     vec3 rgb = vColor.rgb;
     float a = vColor.a * k;
-    if (p.mode.x != 0) {
+    if (p.mode.x == 4) {
+        // The anime pass (gs_draw.c, vu0.vert layer 7): the texture is twice the model texture's height, its colours
+        // in the light on top, in the shadow below (gs_texpack.h). vColor.r: where this point is on the shading ramp;
+        // misc.x: the ramp's edge there, orig.x: 1 if the light is past it, -1 if before. orig.y: 1 = clamped in v.
+        bool lit = (vColor.r - p.misc.x) * p.orig.x >= 0.0;
+        vec2 uv = vStq.xy / vStq.z;
+        float h = 0.5 / float(textureSize(tex, 0).y);
+        float v = p.orig.y > 0.5 ? clamp(uv.y, 0.0, 1.0) : fract(uv.y);
+        vec4 t = texture(tex, vec2(uv.x, clamp(v * 0.5, h, 0.5 - h) + (lit ? 0.0 : 0.5)));
+        if (t.a < 0.5) discard; // (the game's own shading kept there)
+        rgb = t.rgb * vColor.g * k;
+        a = vColor.a * k;
+    } else if (p.mode.x != 0) {
         vec2 uv = vStq.xy / vStq.z;
         if (p.misc.w != 0.0) {
             // A 2D sprite: take the texture coordinate where the GS takes it, at the whole GS pixel this fragment

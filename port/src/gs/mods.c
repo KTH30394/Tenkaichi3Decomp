@@ -772,18 +772,18 @@ static int l_hud_hide_game(lua_State *L) {
     return 0;
 }
 
-/* bt3.look{shading = 0..100, rim = 0..100, rim_color = 0xRRGGBBAA, vivid, ambient, energy, energy_light}: how the
+/* bt3.look{shading = 0..100, rim = 0..100, rim_color = 0xRRGGBBAA, vivid, ambient, energy, energy_light, cut}: how the
    renderer draws the fight's picture this blank (mods.h ModsLook). Asked again every blank, like the shapes: a mod
    switched off or stopped leaves the picture as the game draws it. Fields left out are not changed; with several
    mods each one is the strongest asked for. Only the picture changes, never the fight. */
 static int l_look(lua_State *L) {
-    static const char *const keys[] = {"shading", "rim", "vivid", "ambient", "energy", "energy_light"};
+    static const char *const keys[] = {"shading", "rim", "vivid", "ambient", "energy", "energy_light", "cut"};
     int *const out[] = {&sLookBuild.shading, &sLookBuild.rim, &sLookBuild.vivid, &sLookBuild.ambient,
-                        &sLookBuild.energy, &sLookBuild.energy_light};
+                        &sLookBuild.energy, &sLookBuild.energy_light, &sLookBuild.cut};
     int k;
 
     luaL_checktype(L, 1, LUA_TTABLE);
-    for (k = 0; k < 6; k++) {
+    for (k = 0; k < 7; k++) {
         lua_getfield(L, 1, keys[k]);
         if (!lua_isnil(L, -1)) {
             lua_Number v = luaL_checknumber(L, -1);

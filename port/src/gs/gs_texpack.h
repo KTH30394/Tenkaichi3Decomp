@@ -26,5 +26,12 @@ const char *TexPack_Path(int id);
 /* Replacement `id`'s pixels: 1 and *img (kept by the pack: valid until the next call), 0 while the file is still
    being read (in the background: ask again later), -1 if it cannot be read. */
 int TexPack_Get(int id, TexPackImage *img);
+/* Anime colours (gs_draw.c, the fighters' anime pass): "<name>.anime.png" beside the pack's names, twice the texture's
+   height, its top half the colour of each texel where the light falls, its bottom half where it does not; alpha 0
+   where the game's own shading is kept. TexPack_AnimeLast: the one for the texture of the last TexPack_Lookup, or -1.
+   TexPack_LoadAnime reads it now (1 = read; let go with TexPack_Free). */
+int TexPack_AnimeLast(void);
+int TexPack_LoadAnime(int id, TexPackImage *img);
+void TexPack_Free(TexPackImage *img);
 
 #endif

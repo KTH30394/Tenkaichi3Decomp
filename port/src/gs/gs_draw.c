@@ -249,6 +249,9 @@ typedef struct Tex {
     int pack;                /* a texture pack's replacement still being read (gs_texpack.c), or -1 */
     uint32_t packAlpha;      /* and the amax it will have */
     float avg[3];            /* its average colour, weighted by alpha, 0..1 (an energy light's colour is in its texture) */
+    GsTex anime;             /* its anime colours from the texture pack (TexPack_LoadAnime), 0 = none */
+    float toonEdge, toonDir; /* a shading ramp redrawn (toon_sharpen): where its edge is (0..1 along it), and 1 if the lit
+                                side is past the edge, -1 if before it; 0 = not one */
 } Tex;
 static Tex sTex[MAX_TEX];
 static uint16_t sTexBucket[TEX_BUCKETS]; /* index + 1 of a cache entry, 0 = empty (open addressing) */
@@ -317,20 +320,24 @@ static void light_add(float x0, float y0, float x1, float y1, float z, float r, 
 }
 
 /* The ramp `px` (w x h, GS RGBA) redrawn at `sharp` (1..100) into a new picture 256 wide: *ow, *oh. NULL: left as
-   it is. */
-static uint32_t *toon_sharpen(const uint32_t *px, uint32_t w, uint32_t h, int sharp, uint32_t *ow, uint32_t *oh) {
+   it is. `cut` (0..100, bt3.look): the edge moved towards the dark end, by up to a third of the ramp. *edge, *dir:
+   where the edge of its first row came out (0..1) and on which side of it the light is (Tex.toonEdge). */
+static uint32_t *toon_sharpen(const uint32_t *px, uint32_t w, uint32_t h, int sharp, int cut, uint32_t *ow, uint32_t *oh,
+                              float *edge, float *dir) {
     static const float kCool[3] = {0.84f, 0.84f, 1.10f};
     const uint32_t W = w < 256 ? 256 : w;
     uint32_t *out = (uint32_t *)malloc((size_t)W * h * 4), x, y;
     const float k = sharp / 100.0f;
+    *edge = 0.5f;
+    *dir = 0.0f;
     if (out == NULL) {
         return NULL;
     }
     for (y = 0; y < h; y++) {
         const uint8_t *row = (const uint8_t *)(px + (size_t)y * w);
-        float lmin = 1e9f, lmax = -1e9f, lit[3], shade[3], ll, sl;
+        float lmin = 1e9f, lmax = -1e9f, lit[3], shade[3], ll, sl, eLast = 0.0f;
         uint32_t imin = 0, imax = 0;
-        int ch;
+        int ch, edgeSeen = 0;
         for (x = 0; x < w; x++) {
             const uint8_t *c = row + x * 4;
             float l = c[0] * 0.3f + c[1] * 0.59f + c[2] * 0.11f;
@@ -344,9 +351,12 @@ static uint32_t *toon_sharpen(const uint32_t *px, uint32_t w, uint32_t h, int sh
         }
         ll = (lit[0] + lit[1] + lit[2]) / 3.0f;
         sl = (shade[0] + shade[1] + shade[2]) / 3.0f;
+        if (y == 0) {
+            *dir = imax >= imin ? 1.0f : -1.0f;
+        }
         for (x = 0; x < W; x++) {
-            /* the original at this point of the wider ramp, linearly */
-            float sx = ((float)x + 0.5f) * w / W - 0.5f, f, l, t, e;
+            /* the original at this point of the wider ramp, linearly (moved towards the lit end by `cut`) */
+            float sx = ((float)x + 0.5f) * w / W - 0.5f + (imax >= imin ? 1.0f : -1.0f) * cut / 300.0f * (float)w, f, l, t, e;
             int x0 = (int)floorf(sx), x1 = x0 + 1;
             uint8_t o[4], *dst = (uint8_t *)(out + (size_t)y * W + x);
             f = sx - (float)x0;
@@ -359,6 +369,11 @@ static uint32_t *toon_sharpen(const uint32_t *px, uint32_t w, uint32_t h, int sh
             t = lmax - lmin > 4.0f ? (l - lmin) / (lmax - lmin) : 0.5f;
             e = t < 0.36f ? 0.0f : t > 0.6f ? 1.0f : (t - 0.36f) / 0.24f; /* (the soft edge) */
             e = e * e * (3.0f - 2.0f * e);
+            if (y == 0 && x > 0 && (e >= 0.5f) != (eLast >= 0.5f) && !edgeSeen) {
+                *edge = (float)x / (float)W;
+                edgeSeen = 1;
+            }
+            eLast = e;
             for (ch = 0; ch < 3; ch++) {
                 float b = ll + (lit[ch] - ll) * 1.12f;                 /* (lit: a little more saturated) */
                 float a = (sl + (shade[ch] - sl) * 1.15f) * kCool[ch]; /* (shadow: saturated, cooler) */
@@ -810,7 +825,10 @@ static GsTex texture_get(int ctx) {
     gen ^= MenuText_TexKey((int)tw, (int)th, bits <= 8, (int)tbp, (int)cbp, MenuText_RasterScale(SCALE));
     gen ^= bits <= 8 ? MenuLabels_ArtKey() : 0; /* the chosen language's menu art ready: decoded again */
     int toonSharp = sToonWanted ? Mods_Look()->shading : 0; /* (a fighter's shading ramp, redrawn: its own copy) */
-    if (toonSharp > 0) { gen ^= 0x70017000u + (uint32_t)toonSharp * 0x9E3779B1u; }
+    int toonCut = toonSharp > 0 ? Mods_Look()->cut : 0;
+    float toonEdge = 0.5f, toonDir = 0.0f;
+    int animeId = -1;
+    if (toonSharp > 0) { gen ^= 0x70017000u + (uint32_t)toonSharp * 0x9E3779B1u + (uint32_t)toonCut * 0x85EBCA77u; }
     if (sTexPackOn && TexPack_Count() != 0) {
         gen ^= 0x5BD1E995u; /* with the pack and without it are different textures: switching it takes effect at once */
     }
@@ -849,6 +867,9 @@ static GsTex texture_get(int ctx) {
                     sTex[n++] = sTex[i];
                 } else {
                     sBackend->texDestroy(sTex[i].tex);
+                    if (sTex[i].anime != 0) {
+                        sBackend->texDestroy(sTex[i].anime);
+                    }
                 }
             }
             gsTexCount = n;
@@ -871,6 +892,7 @@ static GsTex texture_get(int ctx) {
     if (sTexPackOn && TexPack_Count() != 0) {
         int id = TexPack_Lookup(tbp, tbw, psm, tw, th, (uint32_t)((t0 >> 34) & 1), cbp, cpsm, &packMaxAlpha);
         int got = id >= 0 ? TexPack_Get(id, &pack) : -1;
+        animeId = sToonWanted ? -1 : TexPack_AnimeLast();
         if (got > 0 && sBackend->texSlotsLeft() >= pack.levels && pack_budget_take(&pack)) {
             replaced = 1;
             gGpuTexReplaced++;
@@ -946,7 +968,7 @@ static GsTex texture_get(int ctx) {
     }
     if (toonSharp > 0 && !replaced && !menuText && px != NULL) {
         uint32_t sw = 0, sh = 0;
-        uint32_t *sharp = toon_sharpen(px, tw, th, toonSharp, &sw, &sh);
+        uint32_t *sharp = toon_sharpen(px, tw, th, toonSharp, toonCut, &sw, &sh, &toonEdge, &toonDir);
         if (sharp != NULL) {
             free(px);
             px = sharp;
@@ -1003,6 +1025,16 @@ static GsTex texture_get(int ctx) {
     t->packAlpha = packMaxAlpha;
     memcpy(t->avg, sTexAvg, sizeof(t->avg));
     sTexAvg[0] = sTexAvg[1] = sTexAvg[2] = 1.0f;
+    t->toonEdge = toonEdge;
+    t->toonDir = toonDir;
+    t->anime = 0;
+    if (animeId >= 0 && sBackend->texSlotsLeft() > 0) {
+        TexPackImage img;
+        if (TexPack_LoadAnime(animeId, &img)) {
+            t->anime = pack_texture(&img);
+            TexPack_Free(&img);
+        }
+    }
     return t->tex;
 }
 
@@ -2161,6 +2193,18 @@ void GsGpu_DrawVu4(int ctx, const float *vertices, uint32_t count, const float *
     gsDraws[gsDrawCount++] = d;
 }
 
+/* The anime pass: a strip whose layer 0 texture has anime colours in the texture pack (Tex.anime, gs_texpack.h) is
+   drawn a third time after its shading layer, with the shading on: the same triangles, the anime texture by the
+   model's own texture coordinates, its lit colour where the strip faces the light past the redrawn ramp's edge
+   (Tex.toonEdge) and its shadow colour elsewhere (shaders/vu0.vert layer 7, gs.frag mode 4). Where the anime
+   texture's alpha is 0, what the game drew stays. Layer 0 leaves here what layer 1 of the same strip needs. */
+static struct {
+    const float *vertices;
+    uint32_t count;
+    GsTex anime;
+    int sampler;
+} sAnimeStrip;
+
 /* Vertex program 0 as a shader: one strip of the fighters' models (see shaders/vu0.vert and gs_vu1.c). The strip
    becomes a triangle list of the program's own 48-byte vertices; the constants go into a uniform block. */
 void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, const float *consts) {
@@ -2169,12 +2213,15 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     }
     Vu0Uniform u;
     GsDraw d, *last;
-    float us, vs;
+    float us, vs, rampEdge = -1.0f, rampDir = 0.0f;
     uint32_t i, k;
 
     if (count < 3 || gsVuVertCount + count > MAX_VU_VERTS || gsVuIdxCount + (count - 2) * 3 > MAX_VU_IDX || gsDrawCount == MAX_DRAWS ||
         gsVuUniCount == MAX_VU_UNIFORMS) {
         return;
+    }
+    if (layer == 0) {
+        sAnimeStrip.vertices = NULL;
     }
     sToonWanted = layer == 1; /* (the shading ramp: toon_sharpen) */
     if (!draw_state(ctx, 0, 0, 1, &d, &us, &vs)) {
@@ -2182,6 +2229,16 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         return;
     }
     sToonWanted = 0;
+    if (layer == 0 && sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->anime != 0) {
+        sAnimeStrip.vertices = vertices;
+        sAnimeStrip.count = count;
+        sAnimeStrip.anime = sLast->anime;
+        sAnimeStrip.sampler = d.sampler;
+    }
+    if (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f) {
+        rampEdge = sLast->toonEdge;
+        rampDir = sLast->toonDir;
+    }
     if (layer == 2 && d.misc[1] == 1.0f && d.misc[2] != 0.0f) {
         /* TEST.DATE rejects pixels marked by FBA. Stencil also rejects overlap within this
            draw run, which a single snapshot of the alpha buffer cannot see. */
@@ -2230,6 +2287,33 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     d.uniform = (int)gsVuUniCount;
     gsVuUni[gsVuUniCount++] = u;
     gsDraws[gsDrawCount++] = d;
+    /* The anime pass (sAnimeStrip above): this strip's shading layer, with its layer 0 carrying anime colours. */
+    if (layer == 1 && rampDir != 0.0f && sAnimeStrip.vertices == vertices && sAnimeStrip.count == count &&
+        sAnimeStrip.anime != 0 && Mods_Look()->shading > 0 && gsDrawCount < MAX_DRAWS && gsVuUniCount < MAX_VU_UNIFORMS) {
+        GsDraw a = d;
+        Vu0Uniform au = u;
+        uint64_t prim = gGs.prim, zbuf = gGs.zbuf[ctx];
+        gGs.prim = prim & ~(1ull << 6);      /* (no blending: the colour replaces what is there) */
+        gGs.zbuf[ctx] = zbuf | (1ull << 32); /* (depth not written) */
+        a.pipeline = pipeline_get(ctx, 0, 1, 0);
+        gGs.prim = prim;
+        gGs.zbuf[ctx] = zbuf;
+        a.tex = sAnimeStrip.anime;
+        a.tex_is_target = 0;
+        /* (filtered, with its smaller copies, as a replacement is; clamped in v, gs.frag wraps it by hand: the two
+           halves of the anime texture must not bleed into each other) */
+        a.sampler = sAnimeStrip.sampler | 1 | 4 | 8;
+        a.mode[0] = 4;
+        a.mode[3] = 0;   /* (no alpha test: gs.frag drops what the anime texture leaves to the game) */
+        a.misc[0] = rampEdge;
+        a.misc[1] = 0.0f;
+        a.orig[0] = rampDir;
+        a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
+        au.misc[3] = 7.0f;
+        a.uniform = (int)gsVuUniCount;
+        gsVuUni[gsVuUniCount++] = au;
+        gsDraws[gsDrawCount++] = a;
+    }
     /* A script mod's rim light (bt3.look): after a fighter's shading layer, in the picture itself, the same triangles
        again (layer 6 of shaders/vu0.vert): light added along the edges of the silhouette, more on the side facing
        the light, nothing written to depth. */

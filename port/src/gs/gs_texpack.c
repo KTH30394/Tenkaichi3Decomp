@@ -36,6 +36,7 @@ typedef struct Entry {
     uint64_t tex, clut;
     uint32_t bits;
     int pal;
+    int anime;        /* <name>.anime.png: the lit and shadow colours of the texture's texels (TexPack_AnimeLast) */
     char *path;
     int state;        /* 0 not in memory, 1 waiting for the reader, 2 in memory (img), 3 unreadable */
     unsigned used;    /* when TexPack_Get last asked for it */
@@ -56,17 +57,18 @@ static uint32_t *sHeld, sHeldCount;          /* the entries in memory (state 2) 
 static size_t sHeldBytes, sBudget;
 static unsigned sTick;
 static int sSync = -1;
+static int sAnimeLast = -1; /* the .anime.png the last TexPack_Lookup found, or -1 */
 
 static uint32_t bucket_of(uint64_t tex, uint64_t clut, uint32_t bits) {
     uint64_t h = (tex ^ (clut * 0x9E3779B97F4A7C15ull) ^ bits) * 0x9FB21C651E98DF25ull;
     return (uint32_t)(h >> 40);
 }
 
-static int find(uint64_t tex, uint64_t clut, uint32_t bits, int pal) {
+static int find(uint64_t tex, uint64_t clut, uint32_t bits, int pal, int anime) {
     uint32_t h = bucket_of(tex, clut, bits) & (sBuckets - 1);
     while (sBucket[h] != 0) {
         const Entry *e = &sEntries[sBucket[h] - 1];
-        if (e->tex == tex && e->clut == clut && e->bits == bits && e->pal == pal) {
+        if (e->tex == tex && e->clut == clut && e->bits == bits && e->pal == pal && e->anime == anime) {
             return (int)sBucket[h] - 1;
         }
         h = (h + 1) & (sBuckets - 1);
@@ -74,18 +76,23 @@ static int find(uint64_t tex, uint64_t clut, uint32_t bits, int pal) {
     return -1;
 }
 
-/* "1dd4c76113969303-56e3d4469d2ad392-00005e54.dds" */
+/* "1dd4c76113969303-56e3d4469d2ad392-00005e54.dds" (or "....anime.png": TexPack_AnimeLast) */
 static void add(const char *dir, const char *name) {
-    size_t n = strlen(name);
+    size_t n = strlen(name), stem;
     char part[3][20];
-    int parts = 0, len = 0;
+    int parts = 0, len = 0, anime = 0;
     size_t i;
     Entry e;
 
     if (n < 8 || (SDL_strcasecmp(name + n - 4, ".dds") != 0 && SDL_strcasecmp(name + n - 4, ".png") != 0)) {
         return;
     }
-    for (i = 0; i < n - 4; i++) {
+    stem = n - 4;
+    if (n > 14 && SDL_strcasecmp(name + n - 10, ".anime.png") == 0) {
+        anime = 1;
+        stem = n - 10;
+    }
+    for (i = 0; i < stem; i++) {
         char c = name[i];
         if (c == '-') {
             if (len == 0 || parts == 2) {
@@ -107,6 +114,7 @@ static void add(const char *dir, const char *name) {
     e.pal = parts == 3;
     e.clut = e.pal ? strtoull(part[1], NULL, 16) : 0;
     e.bits = (uint32_t)strtoul(part[parts - 1], NULL, 16);
+    e.anime = anime;
     e.state = 0;
     e.used = 0;
     e.held = 0;
@@ -164,7 +172,7 @@ void TexPack_Init(void) {
     for (i = 0; i < sCount; i++) {
         const Entry *e = &sEntries[i];
         uint32_t h = bucket_of(e->tex, e->clut, e->bits) & (sBuckets - 1);
-        if (find(e->tex, e->clut, e->bits, e->pal) >= 0) {
+        if (find(e->tex, e->clut, e->bits, e->pal, e->anime) >= 0) {
             dup++; /* the same name in two folders of the pack: the first one found is used */
             continue;
         }
@@ -191,6 +199,7 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
     int pal = psm == 0x13 || psm == 0x14;
 
     *maxAlpha = 255;
+    sAnimeLast = -1;
     if (sCount == 0) {
         return -1;
     }
@@ -227,7 +236,8 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
     while ((1u << hl) < th) { hl++; }
     bits = psm | wl << 6 | hl << 10 | (tcc & 1) << 14;
     if (!pal) {
-        return find(tex, 0, bits, 0);
+        sAnimeLast = find(tex, 0, bits, 0, 1);
+        return find(tex, 0, bits, 0, 0);
     }
     if (cpsm != 0) {
         return -1; /* 16-bit palettes are expanded with TEXA there: not seen in this game */
@@ -247,9 +257,13 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
                 *maxAlpha = clut[i] >> 24;
             }
         }
-        id = find(tex, XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, 1);
+        id = find(tex, XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, 1, 0);
         if (id < 0) {
-            id = find(tex, XXH3_64bits(clut, count * 4), bits, 1);
+            id = find(tex, XXH3_64bits(clut, count * 4), bits, 1, 0);
+        }
+        sAnimeLast = find(tex, XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, 1, 1);
+        if (sAnimeLast < 0) {
+            sAnimeLast = find(tex, XXH3_64bits(clut, count * 4), bits, 1, 1);
         }
         if (getenv("BT3_TEX_LOG") != NULL) { /* which textures a pack has and which it has not, by the name it would need */
             fprintf(stderr, "texpack: %s %ux%u %u-bit %llx-%llx-%08x%s%s\n", id >= 0 ? "found  " : "missing", tw, th, psm == 0x13 ? 8u : 4u,
@@ -396,6 +410,23 @@ static int load(const char *path, TexPackImage *img) {
 static void image_free(TexPackImage *img) {
     SDL_free(img->file);
     img->file = NULL;
+}
+
+int TexPack_AnimeLast(void) {
+    return sAnimeLast;
+}
+
+/* Read at once (they are few and small), and not kept: the caller makes its texture and lets go (TexPack_Free). */
+int TexPack_LoadAnime(int id, TexPackImage *img) {
+    memset(img, 0, sizeof(*img));
+    if (id < 0 || (uint32_t)id >= sCount || !sEntries[id].anime) {
+        return 0;
+    }
+    return load(sEntries[id].path, img);
+}
+
+void TexPack_Free(TexPackImage *img) {
+    image_free(img);
 }
 
 static size_t image_bytes(const TexPackImage *img) {
