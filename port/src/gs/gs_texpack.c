@@ -36,7 +36,8 @@ typedef struct Entry {
     uint64_t tex, clut;
     uint32_t bits;
     int pal;
-    int anime;        /* <name>.anime.png: the lit and shadow colours of the texture's texels (TexPack_AnimeLast) */
+    int anime;        /* <name>.anime.png: the lit and shadow colours of the texture's texels (TexPack_AnimeFind) */
+    int folder;       /* and then its folder's settings (sFolders) */
     char *path;
     int state;        /* 0 not in memory, 1 waiting for the reader, 2 in memory (img), 3 unreadable */
     unsigned used;    /* when TexPack_Get last asked for it */
@@ -57,9 +58,59 @@ static uint32_t *sHeld, sHeldCount;          /* the entries in memory (state 2) 
 static size_t sHeldBytes, sBudget;
 static unsigned sTick;
 static int sSync = -1;
-static int sAnimeLast = -1; /* the .anime.png the last TexPack_Lookup found, or -1 */
-static int sAnimeAny = -1;  /* without one: an .anime.png of the same texture under another palette, or -1 */
-static uint32_t *sAnimeIds, sAnimeCount; /* the .anime.png entries */
+/* The .anime.png entries (each kept, also where another folder has the same name: one per form of a fighter), their
+   folders' settings, and the texture of the last TexPack_Lookup as TexPack_AnimeFind compares it. */
+static uint32_t *sAnimeIds, sAnimeCount;
+typedef struct AnimeFolder {
+    char *dir;
+    int cut;          /* anime_cut.txt */
+    uint32_t *ramps;  /* anime_ramps.txt: the shading ramps (TexPack_AnimeRamps) this folder's colours are for */
+    int rampCount;
+} AnimeFolder;
+static AnimeFolder *sFolders;
+static int sFolderCount;
+static struct { uint64_t tex, clutUsed, clutAll; uint32_t bits; int pal, valid; } sLookup;
+
+static int folder_of(const char *dir) {
+    char path[1200];
+    FILE *f;
+    int i;
+    AnimeFolder *a;
+
+    for (i = 0; i < sFolderCount; i++) {
+        if (strcmp(sFolders[i].dir, dir) == 0) {
+            return i;
+        }
+    }
+    sFolders = realloc(sFolders, (size_t)(sFolderCount + 1) * sizeof(AnimeFolder));
+    a = &sFolders[sFolderCount];
+    memset(a, 0, sizeof(*a));
+    a->dir = malloc(strlen(dir) + 1);
+    strcpy(a->dir, dir);
+    snprintf(path, sizeof(path), "%sanime_cut.txt", dir);
+    f = fopen(path, "r");
+    if (f != NULL) {
+        if (fscanf(f, "%d", &a->cut) != 1 || a->cut < 0 || a->cut > 100) {
+            a->cut = 0;
+        }
+        fclose(f);
+    }
+    snprintf(path, sizeof(path), "%sanime_ramps.txt", dir); /* one hexadecimal number a line; anything after it ignored */
+    f = fopen(path, "r");
+    if (f != NULL) {
+        char line[256];
+        while (fgets(line, sizeof(line), f) != NULL) {
+            char *end;
+            unsigned long v = strtoul(line, &end, 16);
+            if (end != line) {
+                a->ramps = realloc(a->ramps, (size_t)(a->rampCount + 1) * sizeof(uint32_t));
+                a->ramps[a->rampCount++] = (uint32_t)v;
+            }
+        }
+        fclose(f);
+    }
+    return sFolderCount++;
+}
 
 static uint32_t bucket_of(uint64_t tex, uint64_t clut, uint32_t bits) {
     uint64_t h = (tex ^ (clut * 0x9E3779B97F4A7C15ull) ^ bits) * 0x9FB21C651E98DF25ull;
@@ -78,7 +129,7 @@ static int find(uint64_t tex, uint64_t clut, uint32_t bits, int pal, int anime) 
     return -1;
 }
 
-/* "1dd4c76113969303-56e3d4469d2ad392-00005e54.dds" (or "....anime.png": TexPack_AnimeLast) */
+/* "1dd4c76113969303-56e3d4469d2ad392-00005e54.dds" (or "....anime.png": TexPack_AnimeFind) */
 static void add(const char *dir, const char *name) {
     size_t n = strlen(name), stem;
     char part[3][20];
@@ -117,6 +168,7 @@ static void add(const char *dir, const char *name) {
     e.clut = e.pal ? strtoull(part[1], NULL, 16) : 0;
     e.bits = (uint32_t)strtoul(part[parts - 1], NULL, 16);
     e.anime = anime;
+    e.folder = anime ? folder_of(dir) : -1;
     e.state = 0;
     e.used = 0;
     e.held = 0;
@@ -174,6 +226,11 @@ void TexPack_Init(void) {
     for (i = 0; i < sCount; i++) {
         const Entry *e = &sEntries[i];
         uint32_t h = bucket_of(e->tex, e->clut, e->bits) & (sBuckets - 1);
+        if (e->anime) { /* (not in the buckets: TexPack_AnimeFind goes through all of them) */
+            sAnimeIds = realloc(sAnimeIds, (sAnimeCount + 1) * sizeof(uint32_t));
+            sAnimeIds[sAnimeCount++] = i;
+            continue;
+        }
         if (find(e->tex, e->clut, e->bits, e->pal, e->anime) >= 0) {
             dup++; /* the same name in two folders of the pack: the first one found is used */
             continue;
@@ -182,10 +239,6 @@ void TexPack_Init(void) {
             h = (h + 1) & (sBuckets - 1);
         }
         sBucket[h] = i + 1;
-        if (e->anime) {
-            sAnimeIds = realloc(sAnimeIds, (sAnimeCount + 1) * sizeof(uint32_t));
-            sAnimeIds[sAnimeCount++] = i;
-        }
     }
     fprintf(stderr, "bt3: texture pack: %u replacement textures in %s (%u more with a name already seen)\n", sCount - dup, root, dup);
 }
@@ -205,8 +258,7 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
     int pal = psm == 0x13 || psm == 0x14;
 
     *maxAlpha = 255;
-    sAnimeLast = -1;
-    sAnimeAny = -1;
+    sLookup.valid = 0;
     if (sCount == 0) {
         return -1;
     }
@@ -243,7 +295,11 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
     while ((1u << hl) < th) { hl++; }
     bits = psm | wl << 6 | hl << 10 | (tcc & 1) << 14;
     if (!pal) {
-        sAnimeLast = find(tex, 0, bits, 0, 1);
+        sLookup.tex = tex;
+        sLookup.clutUsed = sLookup.clutAll = 0;
+        sLookup.bits = bits;
+        sLookup.pal = 0;
+        sLookup.valid = 1;
         return find(tex, 0, bits, 0, 0);
     }
     if (cpsm != 0) {
@@ -268,17 +324,12 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
         if (id < 0) {
             id = find(tex, XXH3_64bits(clut, count * 4), bits, 1, 0);
         }
-        sAnimeLast = find(tex, XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, 1, 1);
-        if (sAnimeLast < 0) {
-            sAnimeLast = find(tex, XXH3_64bits(clut, count * 4), bits, 1, 1);
-        }
-        for (i = 0; sAnimeLast < 0 && i < sAnimeCount; i++) { /* (the game repaints the palette for a moment: a hit) */
-            const Entry *e = &sEntries[sAnimeIds[i]];
-            if (e->tex == tex && e->bits == bits && e->pal) {
-                sAnimeAny = (int)sAnimeIds[i];
-                break;
-            }
-        }
+        sLookup.tex = tex;
+        sLookup.clutUsed = XXH3_64bits(&clut[lo], (hi - lo + 1) * 4);
+        sLookup.clutAll = XXH3_64bits(clut, count * 4);
+        sLookup.bits = bits;
+        sLookup.pal = 1;
+        sLookup.valid = 1;
         if (getenv("BT3_TEX_LOG") != NULL) { /* which textures a pack has and which it has not, by the name it would need */
             fprintf(stderr, "texpack: %s %ux%u %u-bit %llx-%llx-%08x%s%s\n", id >= 0 ? "found  " : "missing", tw, th, psm == 0x13 ? 8u : 4u,
                     (unsigned long long)tex, (unsigned long long)XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, id >= 0 ? " " : "",
@@ -426,45 +477,57 @@ static void image_free(TexPackImage *img) {
     img->file = NULL;
 }
 
-int TexPack_AnimeLast(void) {
-    return sAnimeLast;
+int TexPack_AnimeFind(int *ids, int max, int *other) {
+    int n = 0, pass;
+    uint32_t i;
+
+    *other = 0;
+    if (!sLookup.valid) {
+        return 0;
+    }
+    /* pass 0: this very texture; pass 1 (none found): the same one under another palette (the game repaints a fighter's
+       palettes for a moment, a hit), one from each folder */
+    for (pass = 0; pass < 2 && n == 0; pass++) {
+        for (i = 0; i < sAnimeCount && n < max; i++) {
+            const Entry *e = &sEntries[sAnimeIds[i]];
+            int k, seen = 0;
+            if (e->tex != sLookup.tex || e->bits != sLookup.bits || e->pal != sLookup.pal) {
+                continue;
+            }
+            if (pass == 0 && e->pal && e->clut != sLookup.clutUsed && e->clut != sLookup.clutAll) {
+                continue;
+            }
+            for (k = 0; k < n; k++) {
+                seen |= sEntries[ids[k]].folder == e->folder;
+            }
+            if (!seen) {
+                ids[n++] = (int)sAnimeIds[i];
+            }
+        }
+        *other = pass == 1 && n > 0;
+    }
+    return n;
 }
 
-int TexPack_AnimeOtherPalette(void) {
-    return sAnimeAny;
+int TexPack_AnimeRamps(int id, const uint32_t **ramps) {
+    *ramps = NULL;
+    if (id < 0 || (uint32_t)id >= sCount || !sEntries[id].anime) {
+        return 0;
+    }
+    *ramps = sFolders[sEntries[id].folder].ramps;
+    return sFolders[sEntries[id].folder].rampCount;
 }
 
 /* Read at once (they are few and small), and not kept: the caller makes its texture and lets go (TexPack_Free).
    *cut: the number in "anime_cut.txt" in the same folder (0..100), 0 without one. */
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut) {
-    const char *path, *slash;
-    char dir[1024];
-    size_t n;
-    FILE *f;
-
     memset(img, 0, sizeof(*img));
     *cut = 0;
     if (id < 0 || (uint32_t)id >= sCount || !sEntries[id].anime) {
         return 0;
     }
-    path = sEntries[id].path;
-    slash = strrchr(path, '/');
-    if (strrchr(path, '\\') > slash) {
-        slash = strrchr(path, '\\');
-    }
-    n = slash != NULL ? (size_t)(slash - path + 1) : 0;
-    if (n + 14 < sizeof(dir)) {
-        memcpy(dir, path, n);
-        strcpy(dir + n, "anime_cut.txt");
-        f = fopen(dir, "r");
-        if (f != NULL) {
-            if (fscanf(f, "%d", cut) != 1 || *cut < 0 || *cut > 100) {
-                *cut = 0;
-            }
-            fclose(f);
-        }
-    }
-    return load(path, img);
+    *cut = sFolders[sEntries[id].folder].cut;
+    return load(sEntries[id].path, img);
 }
 
 void TexPack_Free(TexPackImage *img) {
