@@ -2335,7 +2335,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         static unsigned frame, strips, anime, passes, l1, l5, other;
         if (frame != gGsFrame) {
             if (strips != 0) {
-                fprintf(stderr, "anime: frame %u: %u strips, %u with anime colours, %u passes; layer 1 %u, 5 %u, other %u\n", frame,
+                fprintf(stderr, "anime: frame %u: %u strips, %u with anime colours, %u anime passes; layer 1 %u, 5 %u, other %u\n", frame,
                         strips, anime, passes, l1, l5, other);
             }
             frame = gGsFrame;
