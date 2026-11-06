@@ -2237,8 +2237,10 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         return;
     }
     sToonWanted = 0;
-    if (getenv("BT3_ANIME_LOG") != NULL && layer != 0 && sAnimeStrip.vertices == vertices) {
-        /* (what follows a strip with anime colours: which layer, its texture, whether it is a redrawn ramp) */
+    if (getenv("BT3_ANIME_LOG") != NULL && layer != 0 && sAnimeStrip.vertices == vertices &&
+        !(layer == 5 || (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f))) {
+        /* (what follows a strip with anime colours, where it is not the usual: which layer, its texture, whether it
+           is a redrawn ramp) */
         fprintf(stderr, "anime: frame %u layer %d tex0 %016llx tex %s ramp %s target %d alpha %02x\n", gGsFrame, layer,
                 (unsigned long long)(gGs.tex0[ctx] & 0x1FFFFFFFFFFFFFFFull),
                 sLast != NULL && sLast->tex == d.tex ? "cached" : "other",
@@ -2246,18 +2248,22 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
                 (unsigned)(gGs.alpha[ctx] & 0xFF));
     }
     if (getenv("BT3_ANIME_LOG") != NULL) { /* (per frame: layer 0 strips, those with anime colours, anime passes drawn) */
-        static unsigned frame, strips, anime, passes;
+        static unsigned frame, strips, anime, passes, l1, l5, other;
         if (frame != gGsFrame) {
             if (strips != 0) {
-                fprintf(stderr, "anime: frame %u: %u strips, %u with anime colours, %u passes\n", frame, strips, anime, passes);
+                fprintf(stderr, "anime: frame %u: %u strips, %u with anime colours, %u passes; layer 1 %u, 5 %u, other %u\n", frame,
+                        strips, anime, passes, l1, l5, other);
             }
             frame = gGsFrame;
-            strips = anime = passes = 0;
+            strips = anime = passes = l1 = l5 = other = 0;
         }
         if (layer == 0) {
             strips++;
             anime += sLast != NULL && sLast->tex == d.tex && sLast->anime != 0;
         }
+        l1 += layer == 1;
+        l5 += layer == 5;
+        other += layer != 0 && layer != 1 && layer != 5;
         passes += layer == 1 || layer == 5 ? (sAnimeStrip.vertices == vertices) : 0;
     }
     if (layer == 0 && sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->anime != 0) {
