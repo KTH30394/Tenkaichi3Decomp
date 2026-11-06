@@ -2300,14 +2300,16 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         gGs.zbuf[ctx] = zbuf;
         a.tex = sAnimeStrip.anime;
         a.tex_is_target = 0;
-        /* (filtered, with its smaller copies, as a replacement is; clamped in v, gs.frag wraps it by hand: the two
-           halves of the anime texture must not bleed into each other) */
-        a.sampler = sAnimeStrip.sampler | 1 | 4 | 8;
+        /* (sampled as the game samples layer 0, so its line art stays as sharp; clamped in v, gs.frag wraps it by
+           hand: the two halves of the anime texture must not bleed into each other) */
+        a.sampler = sAnimeStrip.sampler | 4;
         a.mode[0] = 4;
         a.mode[3] = 0;   /* (no alpha test: gs.frag drops what the anime texture leaves to the game) */
         a.misc[0] = rampEdge;
         a.misc[1] = 0.0f;
-        a.orig[0] = rampDir;
+        /* The ramp's brightest end is where layer 1 leaves the picture darkest: the lit side is the other one
+           (seen on Goku SSJ3: with the sign of toonDir as it is, the shadow fell on the side facing the light). */
+        a.orig[0] = -rampDir;
         a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
         au.misc[3] = 7.0f;
         a.uniform = (int)gsVuUniCount;
