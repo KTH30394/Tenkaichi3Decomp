@@ -2356,17 +2356,45 @@ static struct {
 } sAnimeStrip;
 static uint32_t sAnimeRamp; /* the ramp of the last strip drawn with anime colours (for the hair after it) */
 
-/* Which of the strip's forms is for ramp `ramp`: the index, or -1. */
+/* Which of the strip's forms is for ramp `ramp`: the index, or -1. A form's ramps need not be under every strip: Goku's
+   Super Saiyan forms keep his own ramps on part of the body and have ramps of their own only on others (face, hair).
+   So a form one of whose ramps was drawn in this frame or the one before is the form of every strip that has it (a
+   fighter is one form at a time; the same fighter in two forms on the screen at once would take one of them). */
+static struct { const uint32_t *list; unsigned frame; } sFormSeen[16];
+
 static int anime_form(uint32_t ramp) {
-    int f, any = -1;
+    int f, k, s, any = -1;
     for (f = 0; f < sAnimeStrip.forms; f++) {
         const uint32_t *list;
-        int n = TexPack_AnimeRamps(sAnimeStrip.entry[f], &list), k;
+        int n = TexPack_AnimeRamps(sAnimeStrip.entry[f], &list);
         if (n == 0 && any < 0) {
             any = f;
         }
         for (k = 0; k < n; k++) {
             if (list[k] == ramp) {
+                int free_slot = 0;
+                for (s = 0; s < 16; s++) {
+                    if (sFormSeen[s].list == list) {
+                        break;
+                    }
+                    if (sFormSeen[s].frame < sFormSeen[free_slot].frame) {
+                        free_slot = s;
+                    }
+                }
+                s = s < 16 ? s : free_slot;
+                sFormSeen[s].list = list;
+                sFormSeen[s].frame = gGsFrame;
+                return f;
+            }
+        }
+    }
+    for (f = 0; f < sAnimeStrip.forms; f++) {
+        const uint32_t *list;
+        if (TexPack_AnimeRamps(sAnimeStrip.entry[f], &list) == 0) {
+            continue;
+        }
+        for (s = 0; s < 16; s++) {
+            if (sFormSeen[s].list == list && sFormSeen[s].frame + 1 >= gGsFrame) {
                 return f;
             }
         }
@@ -2406,17 +2434,17 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         /* (a line when it changes: layer 0 strips, those with anime colours, and the ramps under those, by why not
            redrawn and by hash: what anime_ramps.txt lists) */
         static unsigned frame, strips, anime, why[6], nr;
-        static uint32_t ramps[16];
-        static char lastLine[700];
+        static uint32_t ramps[64];
+        static char lastLine[1200];
         if (frame != gGsFrame) {
             if (strips != 0) {
-                char line[700];
+                char line[1200];
                 int at = snprintf(line, sizeof(line), "shading %d, %u strips, %u with anime colours; their ramps: %u redrawn, "
                                   "not: %u shading off, %u pack, %u text, %u no pixels, %u other; hashes", Mods_Look()->shading,
                                   strips, anime, why[1], why[2], why[3], why[4], why[5], why[0]);
                 unsigned q;
-                for (q = 0; q < nr && at > 0 && at < (int)sizeof(line) - 12; q++) {
-                    at += snprintf(line + at, sizeof(line) - (size_t)at, " %08x", ramps[q]);
+                for (q = 0; q < nr && at > 0 && at < (int)sizeof(line) - 16; q++) {
+                    at += snprintf(line + at, sizeof(line) - (size_t)at, " %08x/%04x", ramps[q * 2], ramps[q * 2 + 1]);
                 }
                 if (strcmp(line, lastLine) != 0) {
                     fprintf(stderr, "anime: frame %u: %s\n", frame, line);
@@ -2435,15 +2463,29 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             int ok = sLast != NULL && sLast->tex == d.tex;
             unsigned q, at = 0;
             why[ok && sLast->toonWhy >= 1 && sLast->toonWhy <= 5 ? sLast->toonWhy : 0]++;
-            if (ok) { /* (kept sorted, so the line is the same while the set is) */
-                while (at < nr && ramps[at] < sLast->rampHash) {
+            if (ok) { /* (kept sorted, so the line is the same while the set is; the low bits: which texture's strip) */
+                const char *path = TexPack_Path(sAnimeStrip.entry[0]), *base = path;
+                uint32_t key, tex = 0;
+                const char *c;
+                for (c = path; c != NULL && *c; c++) {
+                    if (*c == '/' || *c == '\\') {
+                        base = c + 1;
+                    }
+                }
+                for (c = base; c != NULL && *c && *c != '-' && c - base < 4; c++) {
+                    tex = tex * 16 + (uint32_t)(*c <= '9' ? *c - '0' : (*c | 32) - 'a' + 10);
+                }
+                key = sLast->rampHash; /* "rrrrrrrr/tttt": the ramp's hash, the first 4 digits of the texture's name */
+                while (at < nr && (ramps[at * 2] < key || (ramps[at * 2] == key && ramps[at * 2 + 1] < tex))) {
                     at++;
                 }
-                if ((at == nr || ramps[at] != sLast->rampHash) && nr < 16) {
+                if ((at == nr || ramps[at * 2] != key || ramps[at * 2 + 1] != tex) && nr < 32) {
                     for (q = nr; q > at; q--) {
-                        ramps[q] = ramps[q - 1];
+                        ramps[q * 2] = ramps[q * 2 - 2];
+                        ramps[q * 2 + 1] = ramps[q * 2 - 1];
                     }
-                    ramps[at] = sLast->rampHash;
+                    ramps[at * 2] = key;
+                    ramps[at * 2 + 1] = tex;
                     nr++;
                 }
             }
