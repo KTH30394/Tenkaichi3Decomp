@@ -1118,6 +1118,11 @@ static GsTex texture_get(int ctx) {
             animeCount += animeTex[animeCount] != 0;
         }
     }
+    if (animeFound > animeCount && getenv("BT3_ANIME_LOG") != NULL) {
+        fprintf(stderr, "anime: frame %u: %ux%u %s: %d of %d made (replaced %d, text %d, pixels %d, size %ux%u, other %d)\n", gGsFrame,
+                (unsigned)tw, (unsigned)th, TexPack_Path(animeIds[0]), animeCount, animeFound, replaced, menuText, px != NULL,
+                (unsigned)rw, (unsigned)rh, animeOther);
+    }
     gGpuTexNs += gpu_now() - tex_t0;
     gDrawTexNs += gpu_now() - tex_t0;
     gDrawNewTex++;
@@ -2459,10 +2464,10 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             strips++;
             anime += sLast != NULL && sLast->tex == d.tex && sLast->animeCount != 0;
         }
-        if (layer == 1 && sAnimeStrip.vertices == vertices) {
-            int ok = sLast != NULL && sLast->tex == d.tex;
+        if ((layer == 1 || layer == 5) && sAnimeStrip.vertices == vertices) {
+            int ok = layer == 5 || (sLast != NULL && sLast->tex == d.tex);
             unsigned q, at = 0;
-            why[ok && sLast->toonWhy >= 1 && sLast->toonWhy <= 5 ? sLast->toonWhy : 0]++;
+            why[layer == 1 && ok && sLast->toonWhy >= 1 && sLast->toonWhy <= 5 ? sLast->toonWhy : 0]++;
             if (ok) { /* (kept sorted, so the line is the same while the set is; the low bits: which texture's strip) */
                 const char *path = TexPack_Path(sAnimeStrip.entry[0]), *base = path;
                 uint32_t key, tex = 0;
@@ -2475,7 +2480,8 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
                 for (c = base; c != NULL && *c && *c != '-' && c - base < 4; c++) {
                     tex = tex * 16 + (uint32_t)(*c <= '9' ? *c - '0' : (*c | 32) - 'a' + 10);
                 }
-                key = sLast->rampHash; /* "rrrrrrrr/tttt": the ramp's hash, the first 4 digits of the texture's name */
+                /* "rrrrrrrr/tttt": the ramp's hash (55555555: program 1, no ramp), the first 4 digits of the texture's name */
+                key = layer == 5 ? 0x55555555u : sLast->rampHash;
                 while (at < nr && (ramps[at * 2] < key || (ramps[at * 2] == key && ramps[at * 2 + 1] < tex))) {
                     at++;
                 }
