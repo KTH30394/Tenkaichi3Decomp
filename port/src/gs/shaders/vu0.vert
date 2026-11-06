@@ -59,6 +59,11 @@ void main() {
         float a = clamp(edge * (0.35 + 0.65 * lit) * u.light2.w, 0.0, 1.0);
         vColor = vec4(u.light2.rgb / 255.0, a * 128.0 / 255.0); // (alpha as the GS has it: 0x80 = 1)
         vStq = vec3(0.0, 0.0, 1.0);
+    } else if (u.misc.w == 8.0) {
+        // the anime pass of program 1 (the hair): where this point is on its second texture's lookup (layer 5's u)
+        vColor = vec4(clamp(dot(u.light, vec4(inNormal.xyz, 1.0)) * 0.5 + 0.5, 0.0, 1.0),
+                      (u.color0.r + u.color0.g + u.color0.b) / 765.0, 0.0, u.color1.a / 255.0);
+        vStq = vec3(inSt.xy, 1.0);
     } else if (u.misc.w == 7.0) {
         // PC only (gs_draw.c, the anime pass): the model's own texture coordinates, and in vColor what gs.frag mode 4
         // needs: r = where on the shading ramp this point is (layer 1's u), g = the material colour (22, as grey),

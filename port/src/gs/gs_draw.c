@@ -2239,6 +2239,10 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         rampEdge = sLast->toonEdge;
         rampDir = sLast->toonDir;
     }
+    if (layer == 5) { /* program 1 (the hair): no ramp; the anime pass cuts its lookup in the middle */
+        rampEdge = 0.5f;
+        rampDir = -1.0f;
+    }
     if (layer == 2 && d.misc[1] == 1.0f && d.misc[2] != 0.0f) {
         /* TEST.DATE rejects pixels marked by FBA. Stencil also rejects overlap within this
            draw run, which a single snapshot of the alpha buffer cannot see. */
@@ -2288,7 +2292,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     gsVuUni[gsVuUniCount++] = u;
     gsDraws[gsDrawCount++] = d;
     /* The anime pass (sAnimeStrip above): this strip's shading layer, with its layer 0 carrying anime colours. */
-    if (layer == 1 && rampDir != 0.0f && sAnimeStrip.vertices == vertices && sAnimeStrip.count == count &&
+    if ((layer == 1 || layer == 5) && rampDir != 0.0f && sAnimeStrip.vertices == vertices && sAnimeStrip.count == count &&
         sAnimeStrip.anime != 0 && Mods_Look()->shading > 0 && gsDrawCount < MAX_DRAWS && gsVuUniCount < MAX_VU_UNIFORMS) {
         GsDraw a = d;
         Vu0Uniform au = u;
@@ -2311,7 +2315,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
            (seen on Goku SSJ3: with the sign of toonDir as it is, the shadow fell on the side facing the light). */
         a.orig[0] = -rampDir;
         a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
-        au.misc[3] = 7.0f;
+        au.misc[3] = layer == 5 ? 8.0f : 7.0f;
         a.uniform = (int)gsVuUniCount;
         gsVuUni[gsVuUniCount++] = au;
         gsDraws[gsDrawCount++] = a;
