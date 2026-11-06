@@ -2565,6 +2565,38 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         sAnimeStrip.forms > 0) {
         form = anime_form();
     }
+    if (getenv("BT3_ANIME_LOG") != NULL && layer != 0) {
+        /* (a line when it changes: by layer, the strips after one with anime colours and how many got the anime pass;
+           and the strips of each layer without any) */
+        static unsigned frame, after[10], drawn[10], plain[10];
+        static char lastLine[400];
+        int q;
+        if (frame != gGsFrame) {
+            char line[400];
+            int at = 0;
+            for (q = 1; q < 10 && at >= 0 && at < (int)sizeof(line) - 40; q++) {
+                if (after[q] || plain[q]) {
+                    at += snprintf(line + at, sizeof(line) - (size_t)at, " layer %d: %u after anime (%u drawn), %u other;", q, after[q],
+                                   drawn[q], plain[q]);
+                }
+            }
+            line[at > 0 ? at : 0] = '\0';
+            if (strcmp(line, lastLine) != 0) {
+                fprintf(stderr, "anime: frame %u:%s\n", frame, line);
+                strcpy(lastLine, line);
+            }
+            frame = gGsFrame;
+            memset(after, 0, sizeof(after));
+            memset(drawn, 0, sizeof(drawn));
+            memset(plain, 0, sizeof(plain));
+        }
+        if (layer > 0 && layer < 10) {
+            int anime = sAnimeStrip.vertices == vertices && sAnimeStrip.forms > 0;
+            after[layer] += anime;
+            drawn[layer] += anime && form >= 0 && rampDir != 0.0f && Mods_Look()->shading > 0;
+            plain[layer] += !anime;
+        }
+    }
     if ((layer == 1 || layer == 5 || layer == 3) && rampDir != 0.0f && form >= 0 && Mods_Look()->shading > 0 &&
         gsDrawCount < MAX_DRAWS && gsVuUniCount < MAX_VU_UNIFORMS) {
         GsDraw a = d;
@@ -2592,6 +2624,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
            (seen on Goku SSJ3: with the sign of toonDir as it is, the shadow fell on the side facing the light). */
         a.orig[0] = -rampDir;
         a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
+        a.orig[2] = TexPack_AnimeIsHair(sAnimeStrip.entry[form]) ? 1.0f : 0.0f; /* hair: its locks outlined (gs.frag) */
         au.misc[3] = layer == 5 ? 8.0f : layer == 3 ? 9.0f : 7.0f;
         a.uniform = (int)gsVuUniCount;
         gsVuUni[gsVuUniCount++] = au;

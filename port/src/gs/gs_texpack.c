@@ -67,7 +67,28 @@ typedef struct AnimeFolder {
     int form;          /* anime_form.txt is there: a form of a fighter (TexPack_AnimeFolderIsForm) */
     uint64_t *markers; /* and the texture hashes in it: textures only that form has (TexPack_AnimeIsMarker) */
     int markerCount;
+    uint64_t *hair;    /* anime_hair.txt: the texture hashes of the hair (TexPack_AnimeIsHair) */
+    int hairCount;
 } AnimeFolder;
+
+/* A file of texture hashes, one a line (hexadecimal; anything after it ignored). 1 = it is there. */
+static int read_hashes(const char *path, uint64_t **list, int *count) {
+    char line[256];
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        return 0;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *end;
+        unsigned long long v = strtoull(line, &end, 16);
+        if (end != line) {
+            *list = realloc(*list, (size_t)(*count + 1) * sizeof(uint64_t));
+            (*list)[(*count)++] = (uint64_t)v;
+        }
+    }
+    fclose(f);
+    return 1;
+}
 static AnimeFolder *sFolders;
 static int sFolderCount;
 static struct { uint64_t tex, clutUsed, clutAll; uint32_t bits; int pal, valid; } sLookup;
@@ -96,21 +117,10 @@ static int folder_of(const char *dir) {
         }
         fclose(f);
     }
-    snprintf(path, sizeof(path), "%sanime_form.txt", dir); /* one texture hash a line (hexadecimal); anything after it ignored */
-    f = fopen(path, "r");
-    if (f != NULL) {
-        char line[256];
-        a->form = 1;
-        while (fgets(line, sizeof(line), f) != NULL) {
-            char *end;
-            unsigned long long v = strtoull(line, &end, 16);
-            if (end != line) {
-                a->markers = realloc(a->markers, (size_t)(a->markerCount + 1) * sizeof(uint64_t));
-                a->markers[a->markerCount++] = (uint64_t)v;
-            }
-        }
-        fclose(f);
-    }
+    snprintf(path, sizeof(path), "%sanime_form.txt", dir);
+    a->form = read_hashes(path, &a->markers, &a->markerCount);
+    snprintf(path, sizeof(path), "%sanime_hair.txt", dir);
+    read_hashes(path, &a->hair, &a->hairCount);
     return sFolderCount++;
 }
 
@@ -517,6 +527,19 @@ int TexPack_AnimeFolder(int id) {
 
 int TexPack_AnimeFolderIsForm(int folder) {
     return folder >= 0 && folder < sFolderCount && sFolders[folder].form;
+}
+
+int TexPack_AnimeIsHair(int id) {
+    int folder = TexPack_AnimeFolder(id), k;
+    if (folder < 0) {
+        return 0;
+    }
+    for (k = 0; k < sFolders[folder].hairCount; k++) {
+        if (sFolders[folder].hair[k] == sEntries[id].tex) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int TexPack_AnimeIsMarker(int id) {

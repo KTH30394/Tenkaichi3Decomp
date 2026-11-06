@@ -23,6 +23,13 @@ layout(set = 1, binding = 0) uniform U {
     vec4 light2;         // program 1: the y components of 10..13
     vec4 target;         // x: GS pixels per texel of the target (gs_draw.c target_lowres; 0 = 1)
 } u;
+// The anime pass (layers 7, 8): how much this point's surface turns away from the camera, 0 facing it, 1 edge-on (gs.frag
+// draws the edge of each lock of hair darker with it).
+float anime_edge(float w) {
+    vec3 n = normalize(mix(mat3(u.boneB) * inNormal.xyz, mat3(u.boneA) * inNormal.xyz, w));
+    vec3 fwd = normalize(vec3(u.screen[0][3], u.screen[1][3], u.screen[2][3])); // (the camera's forward: the w row)
+    return clamp(1.0 - abs(dot(n, fwd)), 0.0, 1.0);
+}
 void main() {
     float w = u.misc.w == 4.0 ? 1.0 : inPos.w; // layer 4 (debris, rigid): the 4th word is a flag, not a weight
     vec3 pa = (u.boneA * vec4(inPos.xyz - u.pivotA.xyz, 1.0)).xyz;
@@ -68,15 +75,15 @@ void main() {
     } else if (u.misc.w == 8.0) {
         // the anime pass of program 1 (the hair): where this point is on its second texture's lookup (layer 5's u)
         vColor = vec4(clamp(dot(u.light, vec4(inNormal.xyz, 1.0)) * 0.5 + 0.5, 0.0, 1.0),
-                      (u.color0.r + u.color0.g + u.color0.b) / 765.0, 0.0, u.color1.a / 255.0);
+                      (u.color0.r + u.color0.g + u.color0.b) / 765.0, anime_edge(w), u.color1.a / 255.0);
         vStq = vec3(inSt.xy, 1.0);
     } else if (u.misc.w == 7.0) {
         // PC only (gs_draw.c, the anime pass): the model's own texture coordinates, and in vColor what gs.frag mode 4
         // needs: r = where on the shading ramp this point is (layer 1's u), g = the material colour (22, as grey),
         // a = layer 1's alpha (23)
         float na = dot(u.light.xyz, mat3(u.boneA) * inNormal.xyz), nb = dot(u.light.xyz, mat3(u.boneB) * inNormal.xyz);
-        vColor = vec4(clamp((mix(nb, na, w) + u.light.w) * 0.5 + 0.5, 0.0, 1.0), (u.color0.r + u.color0.g + u.color0.b) / 765.0, 0.0,
-                      u.color1.a / 255.0);
+        vColor = vec4(clamp((mix(nb, na, w) + u.light.w) * 0.5 + 0.5, 0.0, 1.0), (u.color0.r + u.color0.g + u.color0.b) / 765.0,
+                      anime_edge(w), u.color1.a / 255.0);
         vStq = vec3(inSt.xy, 1.0);
     } else if (u.misc.w >= 3.0) {
         // programs 8 and 7: the colour of each vertex (0..255 floats in the second quadword); 7 takes the mesh's alpha

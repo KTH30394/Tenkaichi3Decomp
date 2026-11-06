@@ -68,6 +68,9 @@ void main() {
         vec4 t = texture(tex, vec2(uv.x, clamp(v * 0.5, h, 0.5 - h) + (lit ? 0.0 : 0.5)));
         if (t.a < 0.5) discard; // (the game's own shading kept there)
         rgb = t.rgb * vColor.g * k;
+        // hair (orig.z, gs_texpack.h anime_hair.txt): a dark line along the edge of each lock, where its surface turns
+        // away from the camera (vColor.b, vu0.vert anime_edge), as the cel outlines every lock
+        if (p.orig.z > 0.5) rgb *= mix(1.0, 0.4, smoothstep(0.78, 0.88, vColor.b));
         a = vColor.a * k;
     } else if (p.mode.x != 0) {
         vec2 uv = vStq.xy / vStq.z;

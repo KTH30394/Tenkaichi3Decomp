@@ -41,6 +41,9 @@ int TexPack_AnimeFind(int *ids, int max, int *other);
 int TexPack_AnimeFolder(int id);
 int TexPack_AnimeFolderIsForm(int folder);
 int TexPack_AnimeIsMarker(int id);
+/* One of the textures listed in its folder's "anime_hair.txt" (hashes, one a line): hair, drawn with a dark line along
+   the edge of each lock (gs.frag mode 4). */
+int TexPack_AnimeIsHair(int id);
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
 void TexPack_Free(TexPackImage *img);
 
