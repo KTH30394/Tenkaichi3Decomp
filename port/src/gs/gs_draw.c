@@ -250,6 +250,7 @@ typedef struct Tex {
     uint32_t packAlpha;      /* and the amax it will have */
     float avg[3];            /* its average colour, weighted by alpha, 0..1 (an energy light's colour is in its texture) */
     GsTex anime;             /* its anime colours from the texture pack (TexPack_LoadAnime), 0 = none */
+    float animeCut;          /* and how far its edge moves towards the shadow side (anime_cut.txt), along the ramp */
     float toonEdge, toonDir; /* a shading ramp redrawn (toon_sharpen): where its edge is (0..1 along it), and 1 if the lit
                                 side is past the edge, -1 if before it; 0 = not one */
 } Tex;
@@ -1028,10 +1029,13 @@ static GsTex texture_get(int ctx) {
     t->toonEdge = toonEdge;
     t->toonDir = toonDir;
     t->anime = 0;
+    t->animeCut = 0.0f;
     if (animeId >= 0 && sBackend->texSlotsLeft() > 0) {
         TexPackImage img;
-        if (TexPack_LoadAnime(animeId, &img)) {
+        int cut = 0;
+        if (TexPack_LoadAnime(animeId, &img, &cut)) {
             t->anime = pack_texture(&img);
+            t->animeCut = (float)cut / 300.0f; /* (as bt3.look cut: up to a third of the ramp) */
             TexPack_Free(&img);
         }
     }
@@ -2203,6 +2207,7 @@ static struct {
     uint32_t count;
     GsTex anime;
     int sampler;
+    float cut;
 } sAnimeStrip;
 
 /* Vertex program 0 as a shader: one strip of the fighters' models (see shaders/vu0.vert and gs_vu1.c). The strip
@@ -2234,6 +2239,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         sAnimeStrip.count = count;
         sAnimeStrip.anime = sLast->anime;
         sAnimeStrip.sampler = d.sampler;
+        sAnimeStrip.cut = sLast->animeCut;
     }
     if (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f) {
         rampEdge = sLast->toonEdge;
@@ -2309,7 +2315,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         a.sampler = sAnimeStrip.sampler | 4;
         a.mode[0] = 4;
         a.mode[3] = 0;   /* (no alpha test: gs.frag drops what the anime texture leaves to the game) */
-        a.misc[0] = rampEdge;
+        a.misc[0] = rampEdge + rampDir * sAnimeStrip.cut; /* (moved towards the shadow side: more of it lit) */
         a.misc[1] = 0.0f;
         /* The ramp's brightest end is where layer 1 leaves the picture darkest: the lit side is the other one
            (seen on Goku SSJ3: with the sign of toonDir as it is, the shadow fell on the side facing the light). */

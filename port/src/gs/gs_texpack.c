@@ -416,13 +416,37 @@ int TexPack_AnimeLast(void) {
     return sAnimeLast;
 }
 
-/* Read at once (they are few and small), and not kept: the caller makes its texture and lets go (TexPack_Free). */
-int TexPack_LoadAnime(int id, TexPackImage *img) {
+/* Read at once (they are few and small), and not kept: the caller makes its texture and lets go (TexPack_Free).
+   *cut: the number in "anime_cut.txt" in the same folder (0..100), 0 without one. */
+int TexPack_LoadAnime(int id, TexPackImage *img, int *cut) {
+    const char *path, *slash;
+    char dir[1024];
+    size_t n;
+    FILE *f;
+
     memset(img, 0, sizeof(*img));
+    *cut = 0;
     if (id < 0 || (uint32_t)id >= sCount || !sEntries[id].anime) {
         return 0;
     }
-    return load(sEntries[id].path, img);
+    path = sEntries[id].path;
+    slash = strrchr(path, '/');
+    if (strrchr(path, '\\') > slash) {
+        slash = strrchr(path, '\\');
+    }
+    n = slash != NULL ? (size_t)(slash - path + 1) : 0;
+    if (n + 14 < sizeof(dir)) {
+        memcpy(dir, path, n);
+        strcpy(dir + n, "anime_cut.txt");
+        f = fopen(dir, "r");
+        if (f != NULL) {
+            if (fscanf(f, "%d", cut) != 1 || *cut < 0 || *cut > 100) {
+                *cut = 0;
+            }
+            fclose(f);
+        }
+    }
+    return load(path, img);
 }
 
 void TexPack_Free(TexPackImage *img) {

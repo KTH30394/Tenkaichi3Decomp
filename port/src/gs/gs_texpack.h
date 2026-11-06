@@ -29,9 +29,10 @@ int TexPack_Get(int id, TexPackImage *img);
 /* Anime colours (gs_draw.c, the fighters' anime pass): "<name>.anime.png" beside the pack's names, twice the texture's
    height, its top half the colour of each texel where the light falls, its bottom half where it does not; alpha 0
    where the game's own shading is kept. TexPack_AnimeLast: the one for the texture of the last TexPack_Lookup, or -1.
-   TexPack_LoadAnime reads it now (1 = read; let go with TexPack_Free). */
+   TexPack_LoadAnime reads it now (1 = read; let go with TexPack_Free). *cut: from "anime_cut.txt" in its folder (one
+   number, 0..100), how far that character's edge between light and shadow moves towards the shadow side. */
 int TexPack_AnimeLast(void);
-int TexPack_LoadAnime(int id, TexPackImage *img);
+int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
 void TexPack_Free(TexPackImage *img);
 
 #endif
