@@ -59,6 +59,10 @@ int TexPack_AnimeIsGloss(int id);
    surface faces across the picture, as a gloss layer's reflection map splits them (Cell's), not by the light; 2 or
    -2: up and down the picture instead (the edge between them runs across: the top of a head). 0 = none. */
 int TexPack_AnimeView(int id);
+/* "anime_up.txt" in its folder (strip hashes, one a line: BT3_ANIME_LOG's "view strip ... uv"): those strips of a
+   folder with anime_view.txt split up and down (as 2 / -2), the rest as the folder says. One part of a model that
+   shares its texture with others (Freezer's head dome, his shoulder pads). */
+int TexPack_AnimeUpStrip(int id, uint32_t uv);
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
 void TexPack_Free(TexPackImage *img);
 

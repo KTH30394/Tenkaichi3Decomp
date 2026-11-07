@@ -2391,6 +2391,19 @@ static uint32_t sStripPack; /* (BT3_ANIME_LOG) the texture of the last strip's l
 static const float *sHiddenStrip; /* the strip whose layers are not drawn (anime_hide.txt), or NULL */
 static uint32_t sHiddenCount;     /* (and its vertex count) */
 
+/* A strip's texture coordinates as one number (FNV-1a over their bits, the vertex count in it too): the same strip of
+   a model has the same one in every frame, whatever the pose (anime_up.txt names strips by it). */
+static uint32_t strip_uv_hash(const float *vertices, uint32_t count) {
+    uint32_t h = 2166136261u ^ count, n, bits;
+    for (n = 0; n < count; n++) {
+        memcpy(&bits, &vertices[n * 12 + 8], 4);
+        h = (h ^ bits) * 16777619u;
+        memcpy(&bits, &vertices[n * 12 + 9], 4);
+        h = (h ^ bits) * 16777619u;
+    }
+    return h;
+}
+
 /* Which way the outline shell faces on the screen, for gs.frag mode 4 (orig.z): 1 = away, 2 = this way, 0 = the anime
    pass draws over it too. BT3_ANIME_SHELL=<n>, else the number in textures/anime_shell.txt, else 1. */
 static int anime_shell(void) {
@@ -2575,9 +2588,46 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         TexPack_AnimeView(sAnimeStrip.entry[0]) != 0) {
         /* anime_view.txt (gs_texpack.h): cut in the middle of where the surface faces across the picture (vu0.vert
            layer 10), whatever the ramp is */
+        uint32_t uv = strip_uv_hash(vertices, count);
         viewSide = (float)TexPack_AnimeView(sAnimeStrip.entry[0]);
+        if (TexPack_AnimeUpStrip(sAnimeStrip.entry[0], uv)) { /* anime_up.txt: this strip up and down (a head's top) */
+            viewSide = viewSide > 0.0f ? 2.0f : -2.0f;
+        }
         rampEdge = 0.5f;
         rampDir = -1.0f;
+        if (getenv("BT3_ANIME_LOG") != NULL) {
+            /* (once a strip: its texture coordinates' hash, what anime_up.txt lists, and where it is on the screen, to
+               tell which strips are which part) */
+            static uint32_t seen[512];
+            static unsigned nseen;
+            unsigned q;
+            for (q = 0; q < nseen && seen[q] != uv; q++) {
+            }
+            if (q == nseen && nseen < 512) {
+                const float *v = vertices, *bone = &consts[0], *piv = &consts[32], *scr = &consts[56];
+                float sx = 0.0f, sy = 0.0f;
+                uint32_t n;
+                seen[nseen++] = uv;
+                for (n = 0; n < count; n++, v += 12) {
+                    float p[4] = {v[0] - piv[0], v[1] - piv[1], v[2] - piv[2], 1.0f}, a[4], s[4];
+                    int j;
+                    for (j = 0; j < 4; j++) {
+                        a[j] = bone[j] * p[0] + bone[4 + j] * p[1] + bone[8 + j] * p[2] + bone[12 + j];
+                    }
+                    a[3] = 1.0f;
+                    for (j = 0; j < 4; j++) {
+                        s[j] = scr[j] * a[0] + scr[4 + j] * a[1] + scr[8 + j] * a[2] + scr[12 + j] * a[3];
+                    }
+                    if (s[3] != 0.0f) {
+                        sx += s[0] / s[3];
+                        sy += s[1] / s[3];
+                    }
+                }
+                fprintf(stderr, "anime: view strip %s uv %08x, %u vertices, on the screen at %.0f, %.0f%s\n",
+                        TexPack_Path(sAnimeStrip.entry[0]), uv, count, sx / (float)count, sy / (float)count,
+                        fabsf(viewSide) > 1.5f ? " (up and down)" : "");
+            }
+        }
     }
     if (layer == 5) { /* program 1 (the hair): no ramp; the anime pass cuts its lookup in the middle */
         rampEdge = 0.5f;
