@@ -726,6 +726,7 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
     int c = 0, k, slot = -1;
     uint32_t i, x, y;
     GsTex tex;
+    const uint8_t *fileOriginal = NULL; /* the original as the file keeps it (its third block), if it does */
 
     *cut = 0.0f;
     for (k = 0; k < 64; k++) {
@@ -749,19 +750,6 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
         sAnimeOrig[slot].id = id;
         sAnimeOrig[slot].w = w;
         sAnimeOrig[slot].h = h;
-    } else {
-        uint32_t darker = 0;
-        const uint8_t *o, *n = (const uint8_t *)px;
-        if (slot < 0 || sAnimeOrig[slot].w != w || sAnimeOrig[slot].h != h) {
-            return 0; /* (the original not seen yet) */
-        }
-        o = (const uint8_t *)sAnimeOrig[slot].px;
-        for (i = 0; i < w * h; i++) {
-            darker += n[i * 4] + 10 < o[i * 4] || n[i * 4 + 1] + 10 < o[i * 4 + 1] || n[i * 4 + 2] + 10 < o[i * 4 + 2];
-        }
-        if (darker > w * h / 20) {
-            return 0;
-        }
     }
     {   /* the file read once (the repaints come every frame while a flash lasts: read each time, the game crawled) */
         static struct { int id, cut; TexPackImage img; } held[64];
@@ -787,19 +775,47 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
         img = held[found].img;
         c = held[found].cut;
     }
-    if (img.format != GS_TEXFMT_RGBA8 || img.w != w || img.h != 2 * h) {
+    if (img.format != GS_TEXFMT_RGBA8 || img.w != w || (img.h != 2 * h && img.h != 3 * h)) {
         return 0;
     }
+    /* A third block under the two (gs_texpack.h): the texture as it was when its anime colours were made. Only the
+       two are uploaded. */
+    if (img.h == 3 * h) {
+        fileOriginal = img.data[0] + (size_t)w * h * 2 * 4;
+        img.h = 2 * h;
+        img.bytes[0] = w * h * 2 * 4;
+        img.levels = 1;
+    }
     if (other) {
+        /* Another palette than the one the colours were made for: the same picture in a fight (each fighter's
+           palette has its own object number in the alpha) or the game's flash over it. The original is the one seen
+           in this session, else the copy in the file's third block; without either, or where this is darker than the
+           original nearly everywhere (another fighter's colours on the same texture), nothing. */
+        uint32_t darker = 0;
+        const uint8_t *o = NULL, *n = (const uint8_t *)px;
+        uint8_t *a;
+        if (slot >= 0 && sAnimeOrig[slot].w == w && sAnimeOrig[slot].h == h) {
+            o = (const uint8_t *)sAnimeOrig[slot].px;
+        } else {
+            o = fileOriginal;
+        }
+        if (o == NULL) {
+            return 0;
+        }
+        for (i = 0; i < w * h; i++) {
+            darker += n[i * 4] + 10 < o[i * 4] || n[i * 4 + 1] + 10 < o[i * 4 + 1] || n[i * 4 + 2] + 10 < o[i * 4 + 2];
+        }
+        if (darker > w * h / 20) {
+            return 0;
+        }
         /* (a copy: the one held stays the original's) */
-        uint8_t *a = (uint8_t *)malloc((size_t)w * h * 2 * 4);
+        a = (uint8_t *)malloc((size_t)w * h * 2 * 4);
         if (a == NULL) {
             return 0;
         }
         memcpy(a, img.data[0], (size_t)w * h * 2 * 4);
         img.data[0] = a;
         img.bytes[0] = w * h * 2 * 4;
-        const uint8_t *o = (const uint8_t *)sAnimeOrig[slot].px, *n = (const uint8_t *)px;
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
                 for (k = 0; k < 3; k++) {

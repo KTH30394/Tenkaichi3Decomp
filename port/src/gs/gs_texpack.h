@@ -28,7 +28,8 @@ const char *TexPack_Path(int id);
 int TexPack_Get(int id, TexPackImage *img);
 /* Anime colours (gs_draw.c, the fighters' anime pass): "<name>.anime.png" beside the pack's names, twice the texture's
    height, its top half the colour of each texel where the light falls, its bottom half where it does not; alpha 0
-   where the game's own shading is kept. The same name may be in several folders: forms of a fighter that share their
+   where the game's own shading is kept. It may have a third block below: the texture as it was (its colours), so the
+   same picture under another palette (a fighter in a fight, a flash) is known for it without having seen it before. The same name may be in several folders: forms of a fighter that share their
    textures (Goku and his Super Saiyan forms). A folder with "anime_form.txt" is a form: its colours go on the shared
    textures only while one of the textures it lists (their hashes, one a line: what only that form has, its hair, its
    face) is being drawn; a folder without it is for any fighter that has those textures.
