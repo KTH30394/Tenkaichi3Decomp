@@ -256,6 +256,7 @@ typedef struct Tex {
     int animeEntry[ANIME_FORMS]; /* (the pack's entries: TexPack_AnimeRamps) */
     int animeCount;
     uint32_t rampHash;       /* a shading ramp: its colours as they are, a little rounded */
+    int rampFlat;            /* and all one tone (an outline shell's): no anime pass over it */
     uint32_t packName;       /* (BT3_ANIME_LOG) the first 8 digits of its texture pack name, 0 = not looked up */
     float toonEdge, toonDir; /* a shading ramp redrawn (toon_sharpen): where its edge is (0..1 along it), and 1 if the lit
                                 side is past the edge, -1 if before it; 0 = not one */
@@ -953,6 +954,7 @@ static GsTex texture_get(int ctx) {
     float animeCut[ANIME_FORMS];
     int animeEntry[ANIME_FORMS];
     uint32_t rampHash = 0, packName = 0;
+    int rampFlat = 0;
     if (toonSharp > 0) { gen ^= 0x70017000u + (uint32_t)toonSharp * 0x9E3779B1u + (uint32_t)toonCut * 0x85EBCA77u; }
     if (sTexPackOn && TexPack_Count() != 0) {
         gen ^= 0x5BD1E995u; /* with the pack and without it are different textures: switching it takes effect at once */
@@ -1097,11 +1099,17 @@ static GsTex texture_get(int ctx) {
     if (sToonWanted && !replaced && !menuText && px != NULL) {
         /* which ramp this is, for the anime colours of a form of a fighter (anime_ramps.txt): its colours, each
            channel rounded to 8 steps (a ramp redrawn by the game's flicker by a step or two is still the same one) */
-        uint32_t n;
+        uint32_t n, lo = 255 * 3, hi = 0;
         rampHash = 2166136261u;
         for (n = 0; n < tw * th; n++) {
+            uint32_t l = (px[n] & 0xFF) + ((px[n] >> 8) & 0xFF) + ((px[n] >> 16) & 0xFF);
             rampHash = (rampHash ^ ((px[n] >> 5) & 0x07070707u)) * 16777619u;
+            lo = l < lo ? l : lo;
+            hi = l > hi ? l : hi;
         }
+        /* a ramp of one tone (light and shadow alike: the dark shell that outlines a model) is no light and shadow at
+           all: the anime pass leaves what is drawn with it to the game */
+        rampFlat = hi - lo < 36;
     }
     if (toonSharp > 0 && !replaced && !menuText && px != NULL) {
         uint32_t sw = 0, sh = 0;
@@ -1187,6 +1195,7 @@ static GsTex texture_get(int ctx) {
         t->animeEntry[f] = animeEntry[f];
     }
     t->rampHash = rampHash;
+    t->rampFlat = rampFlat;
     t->packName = packName;
     return t->tex;
 }
@@ -2527,7 +2536,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         }
         sAnimeStrip.sampler = d.sampler;
     }
-    if (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f) {
+    if (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f && !sLast->rampFlat) {
         rampEdge = sLast->toonEdge;
         rampDir = sLast->toonDir;
     }
@@ -2646,15 +2655,21 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         gsDrawCount < MAX_DRAWS && gsVuUniCount < MAX_VU_UNIFORMS) {
         GsDraw a = d;
         Vu0Uniform au = u;
-        uint64_t prim = gGs.prim, zbuf = gGs.zbuf[ctx];
+        uint64_t prim = gGs.prim, zbuf = gGs.zbuf[ctx], test = gGs.test[ctx];
         gGs.prim = prim & ~(1ull << 6);      /* (no blending: the colour replaces what is there) */
         gGs.zbuf[ctx] = zbuf | (1ull << 32); /* (depth not written) */
+        /* Only where this strip is what is seen (depth: nearer or the same). Layer 1 may be drawn with a looser test:
+           it multiplies, so over a nearer lock's outline it leaves the line dark; this pass replaces the colour, and
+           with that test it painted over the outlines of the locks in front (seen from the front, not from behind,
+           as the locks are drawn back to front one way and not the other). */
+        gGs.test[ctx] = (test & ~(3ull << 17)) | (1ull << 16) | (2ull << 17);
         /* (The alpha is written, as layer 1's: where it differs from what the game left, the outline pass draws a line,
            and that gives each lock of hair its outline, which the user wants kept; with the alpha left alone, they
            were gone.) */
         a.pipeline = pipeline_get(ctx, 0, 1, 0);
         gGs.prim = prim;
         gGs.zbuf[ctx] = zbuf;
+        gGs.test[ctx] = test;
         a.tex = sAnimeStrip.anime[form];
         a.tex_is_target = 0;
         /* (sampled as the game samples layer 0, so its line art stays as sharp; clamped in v, gs.frag wraps it by
