@@ -71,6 +71,8 @@ typedef struct AnimeFolder {
     int hairCount;
     uint64_t *hide;    /* anime_hide.txt: textures whose strips are not drawn (TexPack_AnimeIsHidden) */
     int hideCount;
+    uint64_t *gloss;   /* anime_gloss.txt: textures whose program 1 pass (the gloss) is not drawn (TexPack_AnimeIsGloss) */
+    int glossCount;
     int view;          /* anime_view.txt: 1 or -1, which side; 0 = none (TexPack_AnimeView) */
 } AnimeFolder;
 
@@ -126,6 +128,8 @@ static int folder_of(const char *dir) {
     read_hashes(path, &a->hair, &a->hairCount);
     snprintf(path, sizeof(path), "%sanime_hide.txt", dir);
     read_hashes(path, &a->hide, &a->hideCount);
+    snprintf(path, sizeof(path), "%sanime_gloss.txt", dir);
+    read_hashes(path, &a->gloss, &a->glossCount);
     snprintf(path, sizeof(path), "%sanime_view.txt", dir);
     f = fopen(path, "r");
     if (f != NULL) {
@@ -572,6 +576,19 @@ int TexPack_AnimeIsHair(int id) {
 int TexPack_AnimeView(int id) {
     int folder = TexPack_AnimeFolder(id);
     return folder >= 0 ? sFolders[folder].view : 0;
+}
+
+int TexPack_AnimeIsGloss(int id) {
+    int folder = TexPack_AnimeFolder(id), k;
+    if (folder < 0) {
+        return 0;
+    }
+    for (k = 0; k < sFolders[folder].glossCount; k++) {
+        if (sFolders[folder].gloss[k] == sEntries[id].tex) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int TexPack_AnimeIsHidden(int id) {

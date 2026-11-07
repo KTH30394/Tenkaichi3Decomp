@@ -55,6 +55,7 @@ void GsVu1_StateKeep(int restore) {
 
 static unsigned sUnknown[2][128];
 static unsigned sStatRuns, sStatInstr, sStatKicks;
+int gVuProgram1;
 static unsigned sProgSize;
 static unsigned sHle; /* program calls served by shader versions this frame */
 static struct { unsigned size, runs, instr, kicks; } sProg[16]; /* per loaded program, this frame */
@@ -544,6 +545,7 @@ static int hle_program1(void) {
     if ((mark & 0xFFFF) == 0) {
         return 1;
     }
+    gVuProgram1 = 1;
     for (layer = 0; layer < 2; layer++) {
         memcpy(pkt, &vu.mem[top * 16], 16);
         memcpy(pkt + 16, layer == 0 ? &vu.mem[(top + 1) * 16] : &vu.mem[26 * 16], 16);
@@ -552,6 +554,7 @@ static int hle_program1(void) {
         Gs_RegWrite(0, (tag[0] >> 47) & 0x7FF); /* PRIM from the tag */
         GsGpu_DrawVu0(layer == 0 ? 0 : 5, (int)((tag[0] >> 56) & 1), (const float *)&vu.mem[(top + 5) * 16], count, (const float *)vu.mem);
     }
+    gVuProgram1 = 0;
     sStatKicks++;
     return 1;
 }

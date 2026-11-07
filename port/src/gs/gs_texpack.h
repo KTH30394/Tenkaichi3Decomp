@@ -51,6 +51,10 @@ int TexPack_AnimeIsHair(int id);
    model that already has its anime colours (Cell's gloss: the same triangles again, lit by a reflection map, added).
    Its strips are not drawn at all (gs_draw.c GsGpu_DrawVu0), so the model's anime colours and lines under it show. */
 int TexPack_AnimeIsHidden(int id);
+/* One of the textures listed in its folder's "anime_gloss.txt": its strips drawn by program 1 (the second pass
+   over a part, lit by a reflection map: Freezer's purple) are not drawn; the same texture's program 0 strips (the
+   part itself, under the gloss) are, with their anime colours. For a gloss that shares its texture with the part. */
+int TexPack_AnimeIsGloss(int id);
 /* "anime_view.txt" in its folder (a number, 1 or -1, which side; empty: 1): its light and shadow split by where the
    surface faces across the picture, as a gloss layer's reflection map splits them (Cell's), not by the light. 0 =
    none. */

@@ -2477,10 +2477,12 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         return;
     }
     sToonWanted = 0;
-    /* A strip whose layer 0 texture is in its anime folder's anime_hide.txt (gs_texpack.h): none of its layers drawn. */
+    /* A strip whose layer 0 texture is in its anime folder's anime_hide.txt, or in anime_gloss.txt and drawn by
+       program 1 (gs_texpack.h): none of its layers drawn. */
     if (layer == 0 || layer == 3) {
         sHiddenStrip = sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->animeCount != 0 &&
-                       TexPack_AnimeIsHidden(sLast->animeEntry[0]) ? vertices : NULL;
+                       (TexPack_AnimeIsHidden(sLast->animeEntry[0]) ||
+                        (layer == 0 && gVuProgram1 && TexPack_AnimeIsGloss(sLast->animeEntry[0]))) ? vertices : NULL;
         sHiddenCount = count;
     }
     /* (its own layers only: the vertices may sit where the next program's are, a shadow's, a debris's) */
