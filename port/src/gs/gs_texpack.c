@@ -114,7 +114,7 @@ static int folder_of(const char *dir) {
     snprintf(path, sizeof(path), "%sanime_cut.txt", dir);
     f = fopen(path, "r");
     if (f != NULL) {
-        if (fscanf(f, "%d", &a->cut) != 1 || a->cut < 0 || a->cut > 100) {
+        if (fscanf(f, "%d", &a->cut) != 1 || a->cut < -100 || a->cut > 100) {
             a->cut = 0;
         }
         fclose(f);
@@ -585,7 +585,7 @@ int TexPack_AnimeIsMarker(int id) {
 }
 
 /* Read at once (they are few and small), and not kept: the caller makes its texture and lets go (TexPack_Free).
-   *cut: the number in "anime_cut.txt" in the same folder (0..100), 0 without one. */
+   *cut: the number in "anime_cut.txt" in the same folder (-100..100), 0 without one. */
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut) {
     memset(img, 0, sizeof(*img));
     *cut = 0;

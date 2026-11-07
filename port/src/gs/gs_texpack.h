@@ -37,7 +37,8 @@ int TexPack_Get(int id, TexPackImage *img);
    same texture under another palette (the game repaints a fighter's palettes for a moment when hit or charging),
    *other = 1. TexPack_AnimeFolder: one's folder; TexPack_AnimeFolderIsForm, TexPack_AnimeIsMarker: as above.
    TexPack_LoadAnime reads it now (1 = read; let go with TexPack_Free). *cut: from "anime_cut.txt" in its folder (one
-   number, 0..100), how far that character's edge between light and shadow moves towards the shadow side. */
+   number, -100..100), how far that character's edge between light and shadow moves towards the shadow side (more of
+   it lit; below 0 towards the lit side: less of it lit). */
 int TexPack_AnimeFind(int *ids, int max, int *other);
 uint64_t TexPack_LastTex(void); /* the texture hash the last TexPack_Lookup worked out (its name's first part), 0 = none */
 int TexPack_AnimeFolder(int id);
