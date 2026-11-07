@@ -513,6 +513,13 @@ BtlResWork *BtlRes_GetWork(void) {
 s32 BtlObj_RequestCharaModel(s32 side, s32 chara, s32 costume, s32 variant) {
     s32 model;
 
+#ifdef PORT
+    {
+        /* PC build: a fighter listed in damaged.txt always wears its damaged model (port/src/plat_stages.c) */
+        extern int Port_ForceDamaged(int chara, int costume, int variant);
+        variant = Port_ForceDamaged(chara, costume, variant);
+    }
+#endif
     if (variant != 0) {
         model = chara * 10 + costume + 0x594;
     } else {

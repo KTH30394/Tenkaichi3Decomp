@@ -255,3 +255,40 @@ int Port_TestScreen(void) {
     const char *e = getenv("BT3_TEST_SCREEN");
     return e != NULL ? (int)strtol(e, NULL, 0) : -1;
 }
+
+/* Fighters that always wear their damaged model ("damaged.txt" in the game's folder: lines "chara costume", decimal,
+   costume 0 = the first colour; '#' starts a comment): asked for with variant 0, they get variant 1, in a battle
+   (BtlObj_RequestCharaModel) and in the character viewer (ChrView_GetModelFile), as if the finishing blow had
+   already torn their clothes; the blow that would tear them reloads the same model. Not in an online session (both
+   sides must load the same files). BT3_MODEL_LOG=1 prints every model asked for, to find a fighter's numbers. */
+int Port_ForceDamaged(int chara, int costume, int variant) {
+    static int loaded, n;
+    static int list[64][2];
+    extern int Port_NetSession(void);
+    int k;
+    if (!loaded) {
+        FILE *f = fopen("damaged.txt", "r");
+        char line[128];
+        loaded = 1;
+        while (f != NULL && n < 64 && fgets(line, sizeof(line), f) != NULL) {
+            int c, m;
+            if (line[0] != '#' && sscanf(line, "%d %d", &c, &m) == 2) {
+                list[n][0] = c;
+                list[n][1] = m;
+                n++;
+            }
+        }
+        if (f != NULL) {
+            fclose(f);
+        }
+    }
+    for (k = 0; variant == 0 && !Port_NetSession() && k < n; k++) {
+        if (list[k][0] == chara && list[k][1] == costume) {
+            variant = 1;
+        }
+    }
+    if (getenv("BT3_MODEL_LOG") != NULL) {
+        fprintf(stderr, "model: chara %d costume %d%s\n", chara, costume, variant ? " (damaged)" : "");
+    }
+    return variant;
+}

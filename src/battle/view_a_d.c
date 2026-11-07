@@ -86,6 +86,13 @@ ChrView *gChrView = NULL;
 
 /* File id of a character's model: costume n, or its damaged version. */
 s32 ChrView_GetModelFile(s32 chara, s32 costume, s32 damaged) {
+#ifdef PORT
+    {
+        /* PC build: a fighter listed in damaged.txt always wears its damaged model (port/src/plat_stages.c) */
+        extern int Port_ForceDamaged(int chara, int costume, int variant);
+        damaged = Port_ForceDamaged(chara, costume, damaged);
+    }
+#endif
     if (damaged != 0) {
         return chara * 10 + costume + (CHRVIEW_FILE_FIRST + 4);
     }
