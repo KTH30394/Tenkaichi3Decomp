@@ -23,12 +23,12 @@ layout(set = 1, binding = 0) uniform U {
     vec4 light2;         // program 1: the y components of 10..13
     vec4 target;         // x: GS pixels per texel of the target (gs_draw.c target_lowres; 0 = 1)
 } u;
-// The anime pass (layers 7, 8): how much this point's surface turns away from the camera, 0 facing it, 1 edge-on (gs.frag
-// draws the edge of each lock of hair darker with it).
+// The anime pass (layers 7, 8): which way this point's surface faces, 0 towards the camera, 0.5 edge-on, 1 away from it
+// (gs.frag leaves the hair's dark shell, the inside-out copy behind each lock that draws its outline, to the game).
 float anime_edge(float w) {
     vec3 n = normalize(mix(mat3(u.boneB) * inNormal.xyz, mat3(u.boneA) * inNormal.xyz, w));
     vec3 fwd = normalize(vec3(u.screen[0][3], u.screen[1][3], u.screen[2][3])); // (the camera's forward: the w row)
-    return clamp(1.0 - abs(dot(n, fwd)), 0.0, 1.0);
+    return clamp(dot(n, fwd) * 0.5 + 0.5, 0.0, 1.0);
 }
 void main() {
     float w = u.misc.w == 4.0 ? 1.0 : inPos.w; // layer 4 (debris, rigid): the 4th word is a flag, not a weight

@@ -521,6 +521,10 @@ int TexPack_AnimeFind(int *ids, int max, int *other) {
     return n;
 }
 
+uint64_t TexPack_LastTex(void) {
+    return sLookup.valid ? sLookup.tex : 0;
+}
+
 int TexPack_AnimeFolder(int id) {
     return id >= 0 && (uint32_t)id < sCount && sEntries[id].anime ? sEntries[id].folder : -1;
 }

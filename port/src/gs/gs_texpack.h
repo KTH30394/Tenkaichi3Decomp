@@ -38,6 +38,7 @@ int TexPack_Get(int id, TexPackImage *img);
    TexPack_LoadAnime reads it now (1 = read; let go with TexPack_Free). *cut: from "anime_cut.txt" in its folder (one
    number, 0..100), how far that character's edge between light and shadow moves towards the shadow side. */
 int TexPack_AnimeFind(int *ids, int max, int *other);
+uint64_t TexPack_LastTex(void); /* the texture hash the last TexPack_Lookup worked out (its name's first part), 0 = none */
 int TexPack_AnimeFolder(int id);
 int TexPack_AnimeFolderIsForm(int folder);
 int TexPack_AnimeIsMarker(int id);

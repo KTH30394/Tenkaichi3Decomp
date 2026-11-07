@@ -255,7 +255,8 @@ typedef struct Tex {
     float animeCut[ANIME_FORMS]; /* and how far each one's edge moves towards the shadow side (anime_cut.txt) */
     int animeEntry[ANIME_FORMS]; /* (the pack's entries: TexPack_AnimeRamps) */
     int animeCount;
-    uint32_t rampHash;       /* a shading ramp: its colours as they are, a little rounded (anime_ramps.txt) */
+    uint32_t rampHash;       /* a shading ramp: its colours as they are, a little rounded */
+    uint32_t packName;       /* (BT3_ANIME_LOG) the first 8 digits of its texture pack name, 0 = not looked up */
     float toonEdge, toonDir; /* a shading ramp redrawn (toon_sharpen): where its edge is (0..1 along it), and 1 if the lit
                                 side is past the edge, -1 if before it; 0 = not one */
     int toonWhy;             /* (BT3_ANIME_LOG) asked for as a ramp: 1 redrawn; not: 2 shading off, 3 a pack's, 4 taken as
@@ -951,7 +952,7 @@ static GsTex texture_get(int ctx) {
     GsTex animeTex[ANIME_FORMS];
     float animeCut[ANIME_FORMS];
     int animeEntry[ANIME_FORMS];
-    uint32_t rampHash = 0;
+    uint32_t rampHash = 0, packName = 0;
     if (toonSharp > 0) { gen ^= 0x70017000u + (uint32_t)toonSharp * 0x9E3779B1u + (uint32_t)toonCut * 0x85EBCA77u; }
     if (sTexPackOn && TexPack_Count() != 0) {
         gen ^= 0x5BD1E995u; /* with the pack and without it are different textures: switching it takes effect at once */
@@ -1019,6 +1020,7 @@ static GsTex texture_get(int ctx) {
         int id = TexPack_Lookup(tbp, tbw, psm, tw, th, (uint32_t)((t0 >> 34) & 1), cbp, cpsm, &packMaxAlpha);
         int got = id >= 0 ? TexPack_Get(id, &pack) : -1;
         animeFound = sToonWanted ? 0 : TexPack_AnimeFind(animeIds, ANIME_FORMS, &animeOther);
+        packName = (uint32_t)(TexPack_LastTex() >> 32);
         if (got > 0 && sBackend->texSlotsLeft() >= pack.levels && pack_budget_take(&pack)) {
             replaced = 1;
             gGpuTexReplaced++;
@@ -1185,6 +1187,7 @@ static GsTex texture_get(int ctx) {
         t->animeEntry[f] = animeEntry[f];
     }
     t->rampHash = rampHash;
+    t->packName = packName;
     return t->tex;
 }
 
@@ -2359,6 +2362,7 @@ static struct {
     int forms;
     int sampler;
 } sAnimeStrip;
+static uint32_t sStripPack; /* (BT3_ANIME_LOG) the texture of the last strip's layer 0: Tex.packName */
 
 /* Which of the strip's forms to draw: the index, or -1. A form (TexPack_AnimeFolderIsForm) one of whose own textures
    (its hair, its face: TexPack_AnimeIsMarker) was drawn in the last half second is the form of every strip that has it
@@ -2488,6 +2492,9 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             }
         }
     }
+    if (layer == 0 || layer == 3) { /* (BT3_ANIME_LOG: which texture the strip has; ffffffff: not one of the cache's) */
+        sStripPack = sLast != NULL && sLast->tex == d.tex && !d.tex_is_target ? sLast->packName : 0xFFFFFFFFu;
+    }
     if ((layer == 0 || layer == 3) && sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->animeCount != 0) {
         int f;
         sAnimeStrip.vertices = vertices;
@@ -2568,17 +2575,21 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     if (getenv("BT3_ANIME_LOG") != NULL && layer != 0) {
         /* (a line when it changes: by layer, the strips after one with anime colours and how many got the anime pass;
            and the strips of each layer without any) */
-        static unsigned frame, after[10], drawn[10], plain[10];
-        static char lastLine[400];
+        static unsigned frame, after[10], drawn[10], plain[10], np;
+        static uint32_t plainTex[24]; /* (the layer 0 textures of those without, by their pack names' first 8 digits) */
+        static char lastLine[900];
         int q;
         if (frame != gGsFrame) {
-            char line[400];
+            char line[900];
             int at = 0;
             for (q = 1; q < 10 && at >= 0 && at < (int)sizeof(line) - 40; q++) {
                 if (after[q] || plain[q]) {
                     at += snprintf(line + at, sizeof(line) - (size_t)at, " layer %d: %u after anime (%u drawn), %u other;", q, after[q],
                                    drawn[q], plain[q]);
                 }
+            }
+            for (q = 0; q < (int)np && at >= 0 && at < (int)sizeof(line) - 12; q++) {
+                at += snprintf(line + at, sizeof(line) - (size_t)at, " %08x", plainTex[q]);
             }
             line[at > 0 ? at : 0] = '\0';
             if (strcmp(line, lastLine) != 0) {
@@ -2589,12 +2600,26 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             memset(after, 0, sizeof(after));
             memset(drawn, 0, sizeof(drawn));
             memset(plain, 0, sizeof(plain));
+            np = 0;
         }
         if (layer > 0 && layer < 10) {
             int anime = sAnimeStrip.vertices == vertices && sAnimeStrip.forms > 0;
             after[layer] += anime;
             drawn[layer] += anime && form >= 0 && rampDir != 0.0f && Mods_Look()->shading > 0;
             plain[layer] += !anime;
+            if (!anime && layer == 1) { /* (kept sorted: the line is the same while the set is) */
+                unsigned at = 0, m;
+                while (at < np && plainTex[at] < sStripPack) {
+                    at++;
+                }
+                if ((at == np || plainTex[at] != sStripPack) && np < 24) {
+                    for (m = np; m > at; m--) {
+                        plainTex[m] = plainTex[m - 1];
+                    }
+                    plainTex[at] = sStripPack;
+                    np++;
+                }
+            }
         }
     }
     if ((layer == 1 || layer == 5 || layer == 3) && rampDir != 0.0f && form >= 0 && Mods_Look()->shading > 0 &&
