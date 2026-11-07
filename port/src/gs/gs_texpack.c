@@ -71,6 +71,7 @@ typedef struct AnimeFolder {
     int hairCount;
     uint64_t *hide;    /* anime_hide.txt: textures whose strips are not drawn (TexPack_AnimeIsHidden) */
     int hideCount;
+    int view;          /* anime_view.txt: 1 or -1, which side; 0 = none (TexPack_AnimeView) */
 } AnimeFolder;
 
 /* A file of texture hashes, one a line (hexadecimal; anything after it ignored). 1 = it is there. */
@@ -125,6 +126,16 @@ static int folder_of(const char *dir) {
     read_hashes(path, &a->hair, &a->hairCount);
     snprintf(path, sizeof(path), "%sanime_hide.txt", dir);
     read_hashes(path, &a->hide, &a->hideCount);
+    snprintf(path, sizeof(path), "%sanime_view.txt", dir);
+    f = fopen(path, "r");
+    if (f != NULL) {
+        if (fscanf(f, "%d", &a->view) != 1 || a->view >= 0) {
+            a->view = 1;
+        } else {
+            a->view = -1;
+        }
+        fclose(f);
+    }
     return sFolderCount++;
 }
 
@@ -556,6 +567,11 @@ int TexPack_AnimeIsHair(int id) {
         }
     }
     return 0;
+}
+
+int TexPack_AnimeView(int id) {
+    int folder = TexPack_AnimeFolder(id);
+    return folder >= 0 ? sFolders[folder].view : 0;
 }
 
 int TexPack_AnimeIsHidden(int id) {

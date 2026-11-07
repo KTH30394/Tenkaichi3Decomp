@@ -2457,7 +2457,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     }
     Vu0Uniform u;
     GsDraw d, *last;
-    float us, vs, rampEdge = -1.0f, rampDir = 0.0f;
+    float us, vs, rampEdge = -1.0f, rampDir = 0.0f, viewSide = 0.0f;
     uint32_t i, k;
     int form = -1;
 
@@ -2568,6 +2568,14 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     if (layer == 1 && sLast != NULL && sLast->tex == d.tex && sLast->toonDir != 0.0f && !sLast->rampFlat) {
         rampEdge = sLast->toonEdge;
         rampDir = sLast->toonDir;
+    }
+    if (layer == 1 && sAnimeStrip.vertices == vertices && sAnimeStrip.count == count && sAnimeStrip.forms > 0 &&
+        TexPack_AnimeView(sAnimeStrip.entry[0]) != 0) {
+        /* anime_view.txt (gs_texpack.h): cut in the middle of where the surface faces across the picture (vu0.vert
+           layer 10), whatever the ramp is */
+        viewSide = (float)TexPack_AnimeView(sAnimeStrip.entry[0]);
+        rampEdge = 0.5f;
+        rampDir = -1.0f;
     }
     if (layer == 5) { /* program 1 (the hair): no ramp; the anime pass cuts its lookup in the middle */
         rampEdge = 0.5f;
@@ -2726,7 +2734,10 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             }
             a.count = gsVuIdxCount - a.first;
         }
-        au.misc[3] = layer == 5 ? 8.0f : layer == 3 ? 9.0f : 7.0f;
+        au.misc[3] = layer == 5 ? 8.0f : layer == 3 ? 9.0f : viewSide != 0.0f ? 10.0f : 7.0f;
+        if (viewSide != 0.0f) {
+            au.light2[0] = viewSide;
+        }
         a.uniform = (int)gsVuUniCount;
         gsVuUni[gsVuUniCount++] = au;
         gsDraws[gsDrawCount++] = a;

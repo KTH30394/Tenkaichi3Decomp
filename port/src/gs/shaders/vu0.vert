@@ -19,7 +19,7 @@ layout(set = 1, binding = 0) uniform U {
     mat4 screen;         // 14..17
     vec4 light;          // xyz: the x components of 10..12, w: of 13
     vec4 color0, color1; // 22, 23 (0..255)
-    vec4 misc;           // x, y: XYOFFSET in pixels, z: depth maximum, w: layer (0 or 1; 2 = programs 2a / 2b; 3 = program 8; 4 = program 7; 5 = program 1 layer 1; 6 = the rim light; 7, 8, 9 = the anime pass after programs 0, 1, 8)
+    vec4 misc;           // x, y: XYOFFSET in pixels, z: depth maximum, w: layer (0 or 1; 2 = programs 2a / 2b; 3 = program 8; 4 = program 7; 5 = program 1 layer 1; 6 = the rim light; 7, 8, 9 = the anime pass after programs 0, 1, 8; 10 = 7 split by the view)
     vec4 light2;         // program 1: the y components of 10..13
     vec4 target;         // x: GS pixels per texel of the target (gs_draw.c target_lowres; 0 = 1)
 } u;
@@ -76,6 +76,17 @@ void main() {
         // the anime pass of program 1 (the hair): where this point is on its second texture's lookup (layer 5's u)
         vColor = vec4(clamp(dot(u.light, vec4(inNormal.xyz, 1.0)) * 0.5 + 0.5, 0.0, 1.0),
                       (u.color0.r + u.color0.g + u.color0.b) / 765.0, anime_edge(w), u.color1.a / 255.0);
+        vStq = vec3(inSt.xy, 1.0);
+    } else if (u.misc.w == 10.0) {
+        // PC only (gs_draw.c, the anime pass of a folder with anime_view.txt): as layer 7, but r is where this point's
+        // surface faces across the picture (0 one side, 0.5 straight at the camera, 1 the other; light2.x: which side),
+        // as the reflection map of a gloss layer (Cell's) splits light and shadow, not where the light comes from
+        vec3 n = normalize(mix(mat3(u.boneB) * inNormal.xyz, mat3(u.boneA) * inNormal.xyz, w));
+        vec3 fwd = normalize(vec3(u.screen[0][3], u.screen[1][3], u.screen[2][3]));
+        vec3 x = vec3(u.screen[0][0], u.screen[1][0], u.screen[2][0]);
+        vec3 right = normalize(x - dot(x, fwd) * fwd); // (the picture's x without the perspective's part)
+        vColor = vec4(clamp(dot(n, right) * u.light2.x * 0.5 + 0.5, 0.0, 1.0), (u.color0.r + u.color0.g + u.color0.b) / 765.0,
+                      anime_edge(w), u.color1.a / 255.0);
         vStq = vec3(inSt.xy, 1.0);
     } else if (u.misc.w == 7.0) {
         // PC only (gs_draw.c, the anime pass): the model's own texture coordinates, and in vColor what gs.frag mode 4
