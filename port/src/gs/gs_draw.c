@@ -2626,16 +2626,15 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         gsDrawCount < MAX_DRAWS && gsVuUniCount < MAX_VU_UNIFORMS) {
         GsDraw a = d;
         Vu0Uniform au = u;
-        uint64_t prim = gGs.prim, zbuf = gGs.zbuf[ctx], frame = gGs.frame[ctx];
+        uint64_t prim = gGs.prim, zbuf = gGs.zbuf[ctx];
         gGs.prim = prim & ~(1ull << 6);      /* (no blending: the colour replaces what is there) */
         gGs.zbuf[ctx] = zbuf | (1ull << 32); /* (depth not written) */
-        /* (nor the alpha: the game keeps which part of a model each pixel is in it, and its outline pass draws the
-           lines between parts from that, between one lock of hair and the next; written over, they were lost) */
-        gGs.frame[ctx] = frame | (0xFF000000ull << 32);
+        /* (The alpha is written, as layer 1's: where it differs from what the game left, the outline pass draws a line,
+           and that gives each lock of hair its outline, which the user wants kept; with the alpha left alone, they
+           were gone.) */
         a.pipeline = pipeline_get(ctx, 0, 1, 0);
         gGs.prim = prim;
         gGs.zbuf[ctx] = zbuf;
-        gGs.frame[ctx] = frame;
         a.tex = sAnimeStrip.anime[form];
         a.tex_is_target = 0;
         /* (sampled as the game samples layer 0, so its line art stays as sharp; clamped in v, gs.frag wraps it by
