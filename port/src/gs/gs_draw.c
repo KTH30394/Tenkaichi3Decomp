@@ -2669,6 +2669,19 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         a.orig[0] = -rampDir;
         a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
         a.orig[2] = (float)anime_shell(); /* the inside-out outline shell left to the game (gs.frag) */
+        if (a.orig[2] != 0.0f && gsVuIdxCount + (count - 2) * 3 <= MAX_VU_IDX) {
+            /* A strip's triangles turn the other way every second one; listed as they come (layer 1's list), half of
+               them would face the other way on the screen. Here every second one is listed the other way round, so
+               they all face as the strip does and gs.frag can tell the shell by it. */
+            uint32_t base = gsVuVertCount - count, n;
+            a.first = gsVuIdxCount;
+            for (n = 0; n + 2 < count; n++) {
+                gsVuIdx[gsVuIdxCount++] = base + n + ((n & 1) ? 1u : 0u);
+                gsVuIdx[gsVuIdxCount++] = base + n + ((n & 1) ? 0u : 1u);
+                gsVuIdx[gsVuIdxCount++] = base + n + 2;
+            }
+            a.count = gsVuIdxCount - a.first;
+        }
         au.misc[3] = layer == 5 ? 8.0f : layer == 3 ? 9.0f : 7.0f;
         a.uniform = (int)gsVuUniCount;
         gsVuUni[gsVuUniCount++] = au;
