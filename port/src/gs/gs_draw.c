@@ -2364,6 +2364,26 @@ static struct {
 } sAnimeStrip;
 static uint32_t sStripPack; /* (BT3_ANIME_LOG) the texture of the last strip's layer 0: Tex.packName */
 
+/* Which way the outline shell faces on the screen, for gs.frag mode 4 (orig.z): 1 = away, 2 = this way, 0 = the anime
+   pass draws over it too. BT3_ANIME_SHELL=<n>, else the number in textures/anime_shell.txt, else 1. */
+static int anime_shell(void) {
+    static int v = -1;
+    if (v < 0) {
+        FILE *f;
+        v = 1;
+        if (getenv("BT3_ANIME_SHELL") != NULL) {
+            v = atoi(getenv("BT3_ANIME_SHELL"));
+        } else if ((f = fopen("textures/anime_shell.txt", "r")) != NULL) {
+            if (fscanf(f, "%d", &v) != 1) {
+                v = 1;
+            }
+            fclose(f);
+        }
+        v = v < 0 || v > 2 ? 1 : v;
+    }
+    return v;
+}
+
 /* Which of the strip's forms to draw: the index, or -1. A form (TexPack_AnimeFolderIsForm) one of whose own textures
    (its hair, its face: TexPack_AnimeIsMarker) was drawn in the last half second is the form of every strip that has it
    (a fighter is one form at a time; the same fighter in two forms on the screen at once would take one of them; the
@@ -2648,7 +2668,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
            (seen on Goku SSJ3: with the sign of toonDir as it is, the shadow fell on the side facing the light). */
         a.orig[0] = -rampDir;
         a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
-        a.orig[2] = TexPack_AnimeIsHair(sAnimeStrip.entry[form]) ? 1.0f : 0.0f; /* hair: its locks outlined (gs.frag) */
+        a.orig[2] = (float)anime_shell(); /* the inside-out outline shell left to the game (gs.frag) */
         au.misc[3] = layer == 5 ? 8.0f : layer == 3 ? 9.0f : 7.0f;
         a.uniform = (int)gsVuUniCount;
         gsVuUni[gsVuUniCount++] = au;

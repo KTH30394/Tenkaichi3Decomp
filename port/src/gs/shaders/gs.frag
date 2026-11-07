@@ -67,10 +67,11 @@ void main() {
         float v = p.orig.y > 0.5 ? clamp(uv.y, 0.0, 1.0) : fract(uv.y);
         vec4 t = texture(tex, vec2(uv.x, clamp(v * 0.5, h, 0.5 - h) + (lit ? 0.0 : 0.5)));
         if (t.a < 0.5) discard; // (the game's own shading kept there)
-        // hair (orig.z, gs_texpack.h anime_hair.txt): each lock is drawn twice, the second time inside out and behind it,
-        // and that shell, in the ramp's dark end, is the line round every lock. Where the surface faces away from the
-        // camera (vColor.b, vu0.vert anime_edge) it is the shell: left as the game drew it.
-        if (p.orig.z > 0.5 && vColor.b > 0.55) discard;
+        // The game outlines a model by drawing it a second time inside out, behind it: those triangles face the other
+        // way on the screen, and they are the line round every lock of hair (the outline pass only draws lines between
+        // parts, and a head of hair is one part). Left as the game drew them, on every model (orig.z: 1 = the shell is
+        // what faces away, 2 = what faces this way, gs_draw.c anime_shell; 0 = drawn over).
+        if ((p.orig.z > 0.5 && p.orig.z < 1.5 && !gl_FrontFacing) || (p.orig.z > 1.5 && gl_FrontFacing)) discard;
         rgb = t.rgb * vColor.g * k;
         a = vColor.a * k;
     } else if (p.mode.x != 0) {
