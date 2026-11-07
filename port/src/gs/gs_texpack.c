@@ -277,7 +277,12 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
     if (psm == 0x13) { bw = 16; bh = 16; }
     else if (psm == 0x14) { bw = 32; bh = 16; }
     else if (psm == 0x00) { bw = 8; bh = 8; }
-    else { return -1; }
+    else {
+        if (getenv("BT3_TEX_LOG") != NULL) {
+            fprintf(stderr, "texpack: unhashed %ux%u psm %02x\n", tw, th, psm);
+        }
+        return -1;
+    }
     if (tw < bw || th < bh) {
         return -1; /* smaller than a block: hashed another way there, which is not worked out */
     }
@@ -312,6 +317,9 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
         sLookup.bits = bits;
         sLookup.pal = 0;
         sLookup.valid = 1;
+        if (getenv("BT3_TEX_LOG") != NULL) {
+            fprintf(stderr, "texpack: direct  %ux%u 32-bit %llx-%08x\n", tw, th, (unsigned long long)tex, bits);
+        }
         return find(tex, 0, bits, 0, 0);
     }
     if (cpsm != 0) {
