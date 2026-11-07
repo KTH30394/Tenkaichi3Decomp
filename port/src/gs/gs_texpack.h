@@ -46,6 +46,10 @@ int TexPack_AnimeIsMarker(int id);
 /* One of the textures listed in its folder's "anime_hair.txt" (hashes, one a line): hair, drawn with a dark line along
    the edge of each lock (gs.frag mode 4). */
 int TexPack_AnimeIsHair(int id);
+/* One of the textures listed in its folder's "anime_hide.txt" (hashes, one a line): a layer the game draws over a
+   model that already has its anime colours (Cell's gloss: the same triangles again, lit by a reflection map, added).
+   Its strips are not drawn at all (gs_draw.c GsGpu_DrawVu0), so the model's anime colours and lines under it show. */
+int TexPack_AnimeIsHidden(int id);
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
 void TexPack_Free(TexPackImage *img);
 

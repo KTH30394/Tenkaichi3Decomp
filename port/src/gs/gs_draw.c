@@ -2388,6 +2388,8 @@ static struct {
     int sampler;
 } sAnimeStrip;
 static uint32_t sStripPack; /* (BT3_ANIME_LOG) the texture of the last strip's layer 0: Tex.packName */
+static const float *sHiddenStrip; /* the strip whose layers are not drawn (anime_hide.txt), or NULL */
+static uint32_t sHiddenCount;     /* (and its vertex count) */
 
 /* Which way the outline shell faces on the screen, for gs.frag mode 4 (orig.z): 1 = away, 2 = this way, 0 = the anime
    pass draws over it too. BT3_ANIME_SHELL=<n>, else the number in textures/anime_shell.txt, else 1. */
@@ -2475,6 +2477,17 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         return;
     }
     sToonWanted = 0;
+    /* A strip whose layer 0 texture is in its anime folder's anime_hide.txt (gs_texpack.h): none of its layers drawn. */
+    if (layer == 0 || layer == 3) {
+        sHiddenStrip = sLast != NULL && sLast->tex == d.tex && !d.tex_is_target && sLast->animeCount != 0 &&
+                       TexPack_AnimeIsHidden(sLast->animeEntry[0]) ? vertices : NULL;
+        sHiddenCount = count;
+    }
+    /* (its own layers only: the vertices may sit where the next program's are, a shadow's, a debris's) */
+    if (sHiddenStrip != NULL && sHiddenStrip == vertices && sHiddenCount == count &&
+        (layer == 0 || layer == 1 || layer == 3 || layer == 5)) {
+        return;
+    }
     if (getenv("BT3_ANIME_LOG") != NULL) {
         /* (a line when it changes: layer 0 strips, those with anime colours, and the ramps under those, by why not
            redrawn and by hash: what anime_ramps.txt lists) */
