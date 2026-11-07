@@ -2738,7 +2738,8 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         }
         au.misc[3] = layer == 5 ? 8.0f : layer == 3 ? 9.0f : viewSide != 0.0f ? 10.0f : 7.0f;
         if (viewSide != 0.0f) {
-            au.light2[0] = viewSide;
+            au.light2[0] = viewSide > 0.0f ? 1.0f : -1.0f;
+            au.light2[1] = fabsf(viewSide) > 1.5f ? 1.0f : 0.0f; /* (anime_view.txt 2 / -2: up and down) */
         }
         a.uniform = (int)gsVuUniCount;
         gsVuUni[gsVuUniCount++] = au;

@@ -56,8 +56,8 @@ int TexPack_AnimeIsHidden(int id);
    part itself, under the gloss) are, with their anime colours. For a gloss that shares its texture with the part. */
 int TexPack_AnimeIsGloss(int id);
 /* "anime_view.txt" in its folder (a number, 1 or -1, which side; empty: 1): its light and shadow split by where the
-   surface faces across the picture, as a gloss layer's reflection map splits them (Cell's), not by the light. 0 =
-   none. */
+   surface faces across the picture, as a gloss layer's reflection map splits them (Cell's), not by the light; 2 or
+   -2: up and down the picture instead (the edge between them runs across: the top of a head). 0 = none. */
 int TexPack_AnimeView(int id);
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
 void TexPack_Free(TexPackImage *img);

@@ -73,7 +73,7 @@ typedef struct AnimeFolder {
     int hideCount;
     uint64_t *gloss;   /* anime_gloss.txt: textures whose program 1 pass (the gloss) is not drawn (TexPack_AnimeIsGloss) */
     int glossCount;
-    int view;          /* anime_view.txt: 1 or -1, which side; 0 = none (TexPack_AnimeView) */
+    int view;          /* anime_view.txt: 1 / -1 across the picture, 2 / -2 up and down it, the sign the side; 0 = none */
 } AnimeFolder;
 
 /* A file of texture hashes, one a line (hexadecimal; anything after it ignored). 1 = it is there. */
@@ -133,11 +133,10 @@ static int folder_of(const char *dir) {
     snprintf(path, sizeof(path), "%sanime_view.txt", dir);
     f = fopen(path, "r");
     if (f != NULL) {
-        if (fscanf(f, "%d", &a->view) != 1 || a->view >= 0) {
+        if (fscanf(f, "%d", &a->view) != 1 || a->view == 0) {
             a->view = 1;
-        } else {
-            a->view = -1;
         }
+        a->view = a->view > 0 ? (a->view >= 2 ? 2 : 1) : (a->view <= -2 ? -2 : -1);
         fclose(f);
     }
     return sFolderCount++;

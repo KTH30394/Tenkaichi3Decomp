@@ -83,8 +83,9 @@ void main() {
         // as the reflection map of a gloss layer (Cell's) splits light and shadow, not where the light comes from
         vec3 n = normalize(mix(mat3(u.boneB) * inNormal.xyz, mat3(u.boneA) * inNormal.xyz, w));
         vec3 fwd = normalize(vec3(u.screen[0][3], u.screen[1][3], u.screen[2][3]));
-        vec3 x = vec3(u.screen[0][0], u.screen[1][0], u.screen[2][0]);
-        vec3 right = normalize(x - dot(x, fwd) * fwd); // (the picture's x without the perspective's part)
+        // light2.y: 1 = up and down the picture instead (the picture's y), for a part lit from above (a head)
+        vec3 x = u.light2.y > 0.5 ? vec3(u.screen[0][1], u.screen[1][1], u.screen[2][1]) : vec3(u.screen[0][0], u.screen[1][0], u.screen[2][0]);
+        vec3 right = normalize(x - dot(x, fwd) * fwd); // (the picture's x (or y) without the perspective's part)
         vColor = vec4(clamp(dot(n, right) * u.light2.x * 0.5 + 0.5, 0.0, 1.0), (u.color0.r + u.color0.g + u.color0.b) / 765.0,
                       anime_edge(w), u.color1.a / 255.0);
         vStq = vec3(inSt.xy, 1.0);
