@@ -771,7 +771,7 @@ static const uint8_t *anime_original(int id, uint32_t w, uint32_t h) {
    lit otherwise (a palette tinted, brightened or darkened) fits it; another picture, or other colours, does not. */
 static float sTintSlope[3] = {1.0f, 1.0f, 1.0f}, sTintOffset[3]; /* the last tint measured (anime_texture), for anime_derive */
 static unsigned sTintFrame;
-static float sFitSlope[3], sFitOffset[3]; /* the last anime_fit's lines */
+static float sFitSlope[3], sFitOffset[3], sFitSpread[3]; /* the last anime_fit's lines */
 
 static double anime_fit(const uint8_t *o, const uint8_t *n, uint32_t count, double mean[3]) {
     double worst = 0.0;
@@ -798,6 +798,7 @@ static double anime_fit(const uint8_t *o, const uint8_t *n, uint32_t count, doub
         mean[k] = (sy - sx) / nn;
         sFitSlope[k] = (float)slope;
         sFitOffset[k] = (float)offset;
+        sFitSpread[k] = (float)sqrt(den > 0.0 ? den : 0.0) / (float)nn; /* (the original's spread in the channel) */
     }
     return worst;
 }
@@ -899,6 +900,13 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
         }
         worst = anime_fit(o, px8, w * h, mean);
         flash = mean[0] >= 40.0 && mean[1] >= 40.0 && mean[2] >= 40.0;
+        for (k = 0; k < 3; k++) {
+            /* a picture gone all one colour in a channel the original has a spread in: not the picture lit
+               otherwise but the game's own effect over it (a fighter painted red for a moment in an intro): the game's */
+            if (sFitSpread[k] > 8.0f && sFitSlope[k] < 0.25f) {
+                worst = 99.0;
+            }
+        }
         if (worst <= 12.0 && sFitSlope[0] > 0.3f && sFitSlope[1] > 0.3f && sFitSlope[2] > 0.3f) {
             /* (the scene's tint, as this fighter's palettes have it now: anime_derive takes it off a face it has no
                file for, to know its colours) */
@@ -1116,7 +1124,31 @@ static int anime_alpha_same(int folder, const uint32_t *px, uint32_t count) {
 static struct { uint64_t tex; uint32_t w, h; uint8_t *orig, *anime; int entry; } sDerived[48];
 static unsigned sDerivedNext;
 
+static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, uint32_t h, uint8_t **out, int *entry);
+
+/* anime_derive_try, but a texture looked for and not found is not looked for again in a while: a scene's flash
+   repaints the palettes every frame while it fades, each a texture decoded anew, and looking through the files each
+   time held the game up (an intro gone by under a frozen picture). The same face found before is quick (sDerived). */
 static int anime_derive(uint64_t texHash, const uint32_t *px, uint32_t w, uint32_t h, uint8_t **out, int *entry) {
+    static struct { uint64_t key; unsigned frame; } failed[256];
+    static unsigned next;
+    uint64_t key = texHash ^ ((uint64_t)w << 48) ^ ((uint64_t)h << 36);
+    int q;
+    for (q = 0; q < 256; q++) {
+        if (failed[q].key == key && failed[q].frame + 120 > gGsFrame) {
+            *out = NULL;
+            return 0;
+        }
+    }
+    if (anime_derive_try(texHash, px, w, h, out, entry)) {
+        return 1;
+    }
+    failed[next & 255].key = key;
+    failed[next++ & 255].frame = gGsFrame;
+    return 0;
+}
+
+static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, uint32_t h, uint8_t **out, int *entry) {
     const uint8_t *now = (const uint8_t *)px;
     uint8_t *p;
     int s, r, k;
