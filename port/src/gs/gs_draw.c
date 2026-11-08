@@ -1096,6 +1096,27 @@ static int anime_derive(uint64_t texHash, const uint32_t *px, uint32_t w, uint32
     if (texHash == 0 || w < 16 || h < 16) {
         return 0;
     }
+    {   /* Only a fighter's own art: its texels carry the model's material number in the alpha (0..15; the stage, the
+           menus, the HUD 0x80 and up), and a picture, not one colour or two (a plain texture matches any table) */
+        uint32_t top = 0, run = 0, distinct = 0, seen[8];
+        int q;
+        for (i = 0; i < w * h; i++) {
+            uint32_t key = px[i] & 0xFFFFFFu;
+            if (now[i * 4 + 3] >= 0x40) {
+                return 0;
+            }
+            for (q = 0; q < (int)distinct && seen[q] != key; q++) {
+            }
+            if (q == (int)distinct && distinct < 8) {
+                seen[distinct++] = key;
+            }
+            run = i > 0 && (px[i] & 0xFFFFFFu) == (px[i - 1] & 0xFFFFFFu) ? run + 1 : 0;
+            top = run > top ? run : top;
+        }
+        if (distinct < 4 || top * 10 > w * h * 6) {
+            return 0;
+        }
+    }
     for (s = 0; s < 48; s++) { /* the same face seen before: lit otherwise now, the same colours */
         double mean[3];
         if (sDerived[s].anime != NULL && sDerived[s].tex == texHash && sDerived[s].w == w && sDerived[s].h == h) {
@@ -1124,7 +1145,7 @@ static int anime_derive(uint64_t texHash, const uint32_t *px, uint32_t w, uint32
         int t, folder = sAnimeRecent[r].folder - 1, *at;
         uint32_t exact = 0, near = 0, miss = 0;
         uint8_t *a;
-        if (folder < 0 || sAnimeRecent[r].frame + 120 < gGsFrame || (t = anime_table(folder)) < 0) {
+        if (folder < 0 || sAnimeRecent[r].frame + 10 < gGsFrame || (t = anime_table(folder)) < 0) {
             continue;
         }
         /* first the exact colours, given up as soon as a fifth of the picture is not (most textures: at once) */
