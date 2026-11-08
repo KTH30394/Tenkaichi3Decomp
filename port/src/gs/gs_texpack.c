@@ -561,6 +561,21 @@ int TexPack_AnimeFind(int *ids, int max, int *other) {
     return n;
 }
 
+int TexPack_AnimeSiblings(int id, int *ids, int max) {
+    int n = 0;
+    uint32_t i;
+    if (id < 0 || (uint32_t)id >= sCount || !sEntries[id].anime) {
+        return 0;
+    }
+    for (i = 0; i < sAnimeCount && n < max; i++) {
+        const Entry *e = &sEntries[sAnimeIds[i]], *o = &sEntries[id];
+        if (e->tex == o->tex && e->bits == o->bits && e->pal == o->pal && e->folder == o->folder) {
+            ids[n++] = (int)sAnimeIds[i];
+        }
+    }
+    return n;
+}
+
 uint64_t TexPack_LastTex(void) {
     return sLookup.valid ? sLookup.tex : 0;
 }

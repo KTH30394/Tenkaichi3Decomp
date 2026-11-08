@@ -722,6 +722,50 @@ static void pack_arrived(Tex *c) {
 static struct { int id; uint32_t w, h; uint32_t *px; } sAnimeOrig[64];
 static unsigned sAnimeOrigNext;
 
+/* An anime file, read once (the repaints come every frame while a flash lasts: read each time, the game crawled).
+   1 = *img and *cut are its own (kept here: not to be let go). */
+static int anime_held(int id, TexPackImage *img, int *cut) {
+    static struct { int id, cut; TexPackImage img; } held[64];
+    static unsigned next;
+    int k, found = -1;
+    for (k = 0; k < 64; k++) {
+        if (held[k].img.file != NULL && held[k].id == id) {
+            found = k;
+            break;
+        }
+    }
+    if (found < 0) {
+        found = (int)(next++ & 63);
+        if (held[found].img.file != NULL) {
+            TexPack_Free(&held[found].img);
+        }
+        if (!TexPack_LoadAnime(id, &held[found].img, &held[found].cut)) {
+            held[found].img.file = NULL;
+            return 0;
+        }
+        held[found].id = id;
+    }
+    *img = held[found].img;
+    *cut = held[found].cut;
+    return 1;
+}
+
+/* The original of an anime file's colours (w x h): as seen in this session, else the file's block under its colours;
+   NULL without either */
+static const uint8_t *anime_original(int id, uint32_t w, uint32_t h) {
+    TexPackImage img;
+    int k, cut;
+    for (k = 0; k < 64; k++) {
+        if (sAnimeOrig[k].px != NULL && sAnimeOrig[k].id == id && sAnimeOrig[k].w == w && sAnimeOrig[k].h == h) {
+            return (const uint8_t *)sAnimeOrig[k].px;
+        }
+    }
+    if (!anime_held(id, &img, &cut) || img.format != GS_TEXFMT_RGBA8 || img.w != w) {
+        return NULL;
+    }
+    return img.h == 4 * h ? img.data[0] + (size_t)w * h * 3 * 4 : img.h == 3 * h ? img.data[0] + (size_t)w * h * 2 * 4 : NULL;
+}
+
 static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, uint32_t h, float *cut, int *tones) {
     TexPackImage img;
     int c = 0, k, slot = -1, n = 2;
@@ -731,6 +775,31 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
 
     *cut = 0.0f;
     *tones = 2;
+    if (other) {
+        /* The same texture under a palette with no file of its own (a fight's, a flash's): of the folder's files for
+           it under each palette (the expressions of a pair of eyes, the faces of two costumes), the one whose original
+           is nearest to this. Taking the first, a pair of eyes got another expression's colours with the difference
+           added: odd eyes and a yellowish face in the close-ups. */
+        int sib[32], ns = TexPack_AnimeSiblings(id, sib, 32), s;
+        uint64_t best = ~0ull;
+        const uint8_t *now = (const uint8_t *)px;
+        for (s = 0; s < ns && ns > 1; s++) {
+            const uint8_t *o = anime_original(sib[s], w, h);
+            uint64_t d = 0;
+            if (o == NULL) {
+                continue;
+            }
+            for (i = 0; i < w * h * 4; i++) {
+                if ((i & 3) != 3) {
+                    d += (uint64_t)abs((int)now[i] - (int)o[i]);
+                }
+            }
+            if (d < best) {
+                best = d;
+                id = sib[s];
+            }
+        }
+    }
     for (k = 0; k < 64; k++) {
         if (sAnimeOrig[k].px != NULL && sAnimeOrig[k].id == id) {
             slot = k;
@@ -753,29 +822,8 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
         sAnimeOrig[slot].w = w;
         sAnimeOrig[slot].h = h;
     }
-    {   /* the file read once (the repaints come every frame while a flash lasts: read each time, the game crawled) */
-        static struct { int id, cut; TexPackImage img; } held[64];
-        static unsigned next;
-        int found = -1;
-        for (k = 0; k < 64; k++) {
-            if (held[k].img.file != NULL && held[k].id == id) {
-                found = k;
-                break;
-            }
-        }
-        if (found < 0) {
-            found = (int)(next++ & 63);
-            if (held[found].img.file != NULL) {
-                TexPack_Free(&held[found].img);
-            }
-            if (!TexPack_LoadAnime(id, &held[found].img, &held[found].cut)) {
-                held[found].img.file = NULL;
-                return 0;
-            }
-            held[found].id = id;
-        }
-        img = held[found].img;
-        c = held[found].cut;
+    if (!anime_held(id, &img, &c)) {
+        return 0;
     }
     if (img.format != GS_TEXFMT_RGBA8 || img.w != w || (img.h != 2 * h && img.h != 3 * h && img.h != 4 * h)) {
         return 0;
@@ -792,12 +840,19 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
     }
     if (other) {
         /* Another palette than the one the colours were made for: the same picture in a fight (each fighter's
-           palette has its own object number in the alpha) or the game's flash over it. The original is the one seen
-           in this session, else the copy in the file's third block; without either, or where this is darker than the
-           original nearly everywhere (another fighter's colours on the same texture), nothing. */
-        uint32_t darker = 0;
+           palette has its own object number in the alpha), the game lighting it for a scene (the intro, a finishing
+           move, a rush: the whole palette tinted) or its flash over it. The original is the one seen in this session,
+           else the copy in the file's block under the colours; without either, nothing.
+           Each channel of this against the original as a straight line (this = slope * original + offset): the same
+           picture only lit otherwise fits it (a palette tinted, brightened or darkened, held at 255 here and there);
+           another fighter's colours on the same texture (another costume) do not, and get nothing. Lit otherwise, the
+           colours are the anime ones as they are (the game's tint added to them, or the anime colours dropped where it
+           darkened, was a face yellowed or in the game's own shading in the close-ups); only a flash (the whole picture
+           much lighter: a hit) is added to them, so it is still seen. */
         const uint8_t *o = NULL, *px8 = (const uint8_t *)px;
         uint8_t *a;
+        double mean[3], worst = 0.0;
+        int flash = 1;
         if (slot >= 0 && sAnimeOrig[slot].w == w && sAnimeOrig[slot].h == h) {
             o = (const uint8_t *)sAnimeOrig[slot].px;
         } else {
@@ -806,11 +861,39 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
         if (o == NULL) {
             return 0;
         }
-        for (i = 0; i < w * h; i++) {
-            darker += px8[i * 4] + 10 < o[i * 4] || px8[i * 4 + 1] + 10 < o[i * 4 + 1] || px8[i * 4 + 2] + 10 < o[i * 4 + 2];
+        for (k = 0; k < 3; k++) {
+            double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0, nn = (double)w * h, den, slope, offset, err = 0.0;
+            for (i = 0; i < w * h; i++) {
+                double ox = o[i * 4 + k], ny = px8[i * 4 + k];
+                sx += ox;
+                sy += ny;
+                sxx += ox * ox;
+                sxy += ox * ny;
+            }
+            den = nn * sxx - sx * sx;
+            slope = den > 1e-6 ? (nn * sxy - sx * sy) / den : 0.0;
+            offset = (sy - slope * sx) / nn;
+            for (i = 0; i < w * h; i++) {
+                double d = px8[i * 4 + k] - (slope * o[i * 4 + k] + offset);
+                err += d * d;
+            }
+            err = sqrt(err / nn);
+            worst = err > worst ? err : worst;
+            mean[k] = (sy - sx) / nn;
+            flash &= mean[k] >= 40.0;
         }
-        if (darker > w * h / 20) {
+        if (getenv("BT3_ANIME_LOG") != NULL) {
+            fprintf(stderr, "anime: other palette %s: fit %.1f, mean %.0f %.0f %.0f: %s\n", TexPack_Path(id), worst, mean[0], mean[1],
+                    mean[2], worst > 12.0 ? "another picture, none" : flash ? "a flash, added" : "lit otherwise, as they are");
+        }
+        if (worst > 12.0) {
             return 0;
+        }
+        if (!flash) {
+            tex = pack_texture(&img);
+            *cut = (float)c / 300.0f;
+            *tones = tex != 0 ? n : 2;
+            return tex;
         }
         /* (a copy: the one held stays the original's) */
         a = (uint8_t *)malloc((size_t)w * h * n * 4);

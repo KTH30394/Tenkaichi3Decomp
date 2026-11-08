@@ -40,6 +40,10 @@ int TexPack_Get(int id, TexPackImage *img);
    number, -100..100), how far that character's edge between light and shadow moves towards the shadow side (more of
    it lit; below 0 towards the lit side: less of it lit). */
 int TexPack_AnimeFind(int *ids, int max, int *other);
+/* The anime entries of the same texture as `id` in its folder under every palette there (id among them): the
+   expressions of a pair of eyes, each its own palette. gs_draw.c takes the one whose original is nearest to a palette
+   it has no file for. */
+int TexPack_AnimeSiblings(int id, int *ids, int max);
 uint64_t TexPack_LastTex(void); /* the texture hash the last TexPack_Lookup worked out (its name's first part), 0 = none */
 int TexPack_AnimeFolder(int id);
 int TexPack_AnimeFolderIsForm(int folder);
