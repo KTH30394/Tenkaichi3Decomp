@@ -1248,33 +1248,85 @@ static int anime_derive(uint64_t texHash, const uint32_t *px, uint32_t w, uint32
             orig = img.data[0] + (size_t)w * h * (best - 1) * 4;
             lit = img.data[0];
             sh = img.data[0] + (size_t)w * h * (best - 2) * 4;
+            /* Which of its colours each colour of this is. By place first: the colour the file has most where this one
+               has it (the same face broken or with another expression lies on the same places: its eyebrows where the
+               file's eyebrows are, whatever the steps between their palettes; by nearness alone, eyebrows a few steps
+               off went to a skin shade nearer to them and lost their colour). Only where that is far off (more than 64
+               steps: a scratch on skin, something the file does not have there), the nearest colour of the file. */
+            uint32_t fc[256], nf = 0, *votes, ref[256];
+            int pix;
+            for (j = 0; j < w * h && nf < 256; j++) {
+                uint32_t key = (uint32_t)orig[j * 4] << 16 | (uint32_t)orig[j * 4 + 1] << 8 | orig[j * 4 + 2], m;
+                for (m = 0; m < nf && fc[m] != key; m++) {
+                }
+                if (m == nf) {
+                    fc[nf++] = key;
+                }
+            }
+            votes = calloc((size_t)nc * 256, sizeof(uint32_t));
+            for (i = 0; i < w * h; i++) {
+                uint32_t key = (uint32_t)p[i * 4] << 16 | (uint32_t)p[i * 4 + 1] << 8 | p[i * 4 + 2], rk, m;
+                rk = (uint32_t)orig[i * 4] << 16 | (uint32_t)orig[i * 4 + 1] << 8 | orig[i * 4 + 2];
+                for (q = 0; q < nc && col[q] != key; q++) {
+                }
+                for (m = 0; m < nf && fc[m] != rk; m++) {
+                }
+                if (q < nc && m < nf) {
+                    votes[q * 256 + m]++;
+                }
+            }
             for (q = 0; q < nc; q++) {
-                /* this colour's nearest there, and the lit and shadow colour of the first of its texels there */
-                uint32_t bd = ~0u, at = 0;
-                for (j = 0; j < w * h; j++) {
-                    int dr = (int)(col[q] >> 16) - orig[j * 4], dg = (int)(col[q] >> 8 & 255) - orig[j * 4 + 1],
-                        db = (int)(col[q] & 255) - orig[j * 4 + 2];
-                    uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
-                    if (d < bd) {
-                        bd = d;
-                        at = j;
-                        if (d == 0) {
-                            break;
+                uint32_t m, top = 0, pick = 0, bd = ~0u;
+                int dr, dg, db;
+                for (m = 0; m < nf; m++) {
+                    if (votes[q * 256 + m] > top) {
+                        top = votes[q * 256 + m];
+                        pick = m;
+                    }
+                }
+                for (m = 0; m < nf && fc[m] != col[q]; m++) {
+                }
+                if (m < nf) { /* the very colour is there: the same palette (another expression of the same face) */
+                    pick = m;
+                    top = 1;
+                }
+                dr = (int)(col[q] >> 16) - (int)(fc[pick] >> 16);
+                dg = (int)(col[q] >> 8 & 255) - (int)(fc[pick] >> 8 & 255);
+                db = (int)(col[q] & 255) - (int)(fc[pick] & 255);
+                if (top == 0 || dr * dr + dg * dg + db * db > 64 * 64) {
+                    for (m = 0; m < nf; m++) {
+                        int er = (int)(col[q] >> 16) - (int)(fc[m] >> 16), eg = (int)(col[q] >> 8 & 255) - (int)(fc[m] >> 8 & 255),
+                            eb = (int)(col[q] & 255) - (int)(fc[m] & 255);
+                        uint32_t d = (uint32_t)(er * er + eg * eg + eb * eb);
+                        if (d < bd) {
+                            bd = d;
+                            pick = m;
                         }
                     }
                 }
-                cnt[q] = at; /* (from here on: where its colours are) */
+                ref[q] = fc[pick];
+                /* (a texel of the file with that colour: where this one's place does not have it) */
+                cnt[q] = 0;
+                for (j = 0; j < w * h; j++) {
+                    if (((uint32_t)orig[j * 4] << 16 | (uint32_t)orig[j * 4 + 1] << 8 | orig[j * 4 + 2]) == ref[q]) {
+                        cnt[q] = j;
+                        break;
+                    }
+                }
             }
-            for (i = 0; i < w * h; i++) {
-                uint32_t key = (uint32_t)p[i * 4] << 16 | (uint32_t)p[i * 4 + 1] << 8 | p[i * 4 + 2], at;
+            free(votes);
+            for (pix = 0; pix < (int)(w * h); pix++) {
+                uint32_t key = (uint32_t)p[pix * 4] << 16 | (uint32_t)p[pix * 4 + 1] << 8 | p[pix * 4 + 2], at;
                 for (q = 0; q < nc && col[q] != key; q++) {
                 }
-                at = cnt[q];
-                memcpy(a + (size_t)i * 4, lit + (size_t)at * 4, 4);
-                memcpy(a + ((size_t)w * h + i) * 4, sh + (size_t)at * 4, 4);
+                /* the file's own lit and shadow colour at this very place where it has the same colour there (a colour
+                   split into parts by place keeps its parts), else at a texel of that colour */
+                at = ((uint32_t)orig[pix * 4] << 16 | (uint32_t)orig[pix * 4 + 1] << 8 | orig[pix * 4 + 2]) == ref[q] ? (uint32_t)pix : cnt[q];
+                memcpy(a + (size_t)pix * 4, lit + (size_t)at * 4, 4);
+                memcpy(a + ((size_t)w * h + pix) * 4, sh + (size_t)at * 4, 4);
                 if (lit[at * 4 + 3] < 128) { /* a line there: left to the game here too */
-                    a[i * 4 + 3] = 0;
-                    a[((size_t)w * h + i) * 4 + 3] = 0;
+                    a[pix * 4 + 3] = 0;
+                    a[((size_t)w * h + pix) * 4 + 3] = 0;
                 }
             }
             {
