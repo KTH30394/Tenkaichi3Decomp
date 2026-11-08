@@ -256,6 +256,8 @@ typedef struct Tex {
     int animeTones[ANIME_FORMS]; /* and 2, or 3 with a middle tone (TexPack_AnimeMid) */
     int animeEntry[ANIME_FORMS]; /* (the pack's entries: TexPack_AnimeRamps) */
     int animeCount;
+    int arow;                /* a fighter's texture: the row of the alpha table its palette has (BtlObjMdl_InitAlphaSlots
+                                writes slot + row * 15 into its alpha: each fighter on the screen its own row); -1 = none */
     uint32_t rampHash;       /* a shading ramp: its colours as they are, a little rounded */
     int rampFlat;            /* and all one tone (an outline shell's): no anime pass over it */
     uint32_t packName;       /* (BT3_ANIME_LOG) the first 8 digits of its texture pack name, 0 = not looked up */
@@ -1659,7 +1661,7 @@ static GsTex texture_get(int ctx) {
     int animeIds[ANIME_FORMS], animeFound = 0, animeOther = 0, animeCount = 0, f;
     GsTex animeTex[ANIME_FORMS];
     float animeCut[ANIME_FORMS];
-    int animeEntry[ANIME_FORMS], animeTones[ANIME_FORMS];
+    int animeEntry[ANIME_FORMS], animeTones[ANIME_FORMS], animeRow = -1;
     uint32_t rampHash = 0, packName = 0;
     int rampFlat = 0;
     if (toonSharp > 0) { gen ^= 0x70017000u + (uint32_t)toonSharp * 0x9E3779B1u + (uint32_t)toonCut * 0x85EBCA77u; }
@@ -1867,6 +1869,8 @@ static GsTex texture_get(int ctx) {
                 (unsigned)tw, (unsigned)th, TexPack_Path(animeIds[0]), animeCount, animeFound, replaced, menuText, px != NULL,
                 (unsigned)rw, (unsigned)rh, animeOther);
     }
+    /* (read here: the pixels go to the back end below, which keeps them) */
+    animeRow = animeCount != 0 && px != NULL && rw == tw && rh == th && (px[0] >> 24) < 0x80 ? (int)((px[0] >> 24) / 15) : -1;
     gGpuTexNs += gpu_now() - tex_t0;
     gDrawTexNs += gpu_now() - tex_t0;
     gDrawNewTex++;
@@ -1923,6 +1927,7 @@ static GsTex texture_get(int ctx) {
     t->toonDir = toonDir;
     t->toonWhy = !sToonWanted ? 0 : toonDir != 0.0f ? 1 : toonSharp <= 0 ? 2 : replaced ? 3 : menuText ? 4 : 5;
     t->animeCount = animeCount;
+    t->arow = animeRow;
     for (f = 0; f < animeCount; f++) {
         t->anime[f] = animeTex[f];
         t->animeCut[f] = animeCut[f];
@@ -3105,6 +3110,7 @@ static struct {
     int entry[ANIME_FORMS];
     int tones[ANIME_FORMS];
     int forms;
+    int row; /* the fighter's row of the alpha table (Tex.arow) */
     int sampler;
 } sAnimeStrip;
 static uint32_t sStripPack; /* (BT3_ANIME_LOG) the texture of the last strip's layer 0: Tex.packName */
@@ -3171,7 +3177,14 @@ static int anime_shell(void) {
    (a fighter is one form at a time; the same fighter in two forms on the screen at once would take one of them; the
    half second: a frame without the hair, or a blink, does not switch the colours off and on). Else a folder for any. */
 #define ANIME_FORM_HOLD 30
-static struct { int folder; unsigned frame; } sFormSeen[16];
+/* Each one by the fighter too: the row of the alpha table its textures have (Tex.arow; -1 = not known). Two fighters
+   on the screen, one the form and the other with some of its textures (a shared piece), each are told by their own. */
+static struct { int folder, row; unsigned frame; } sFormSeen[32];
+
+static int form_seen(int s, int folder, int row) {
+    return sFormSeen[s].folder == folder + 1 && sFormSeen[s].frame + ANIME_FORM_HOLD >= gGsFrame &&
+           (row < 0 || sFormSeen[s].row < 0 || sFormSeen[s].row == row);
+}
 
 /* (anime_derive) a folder whose colours would be drawn now: not a form, or a form one of whose textures was just drawn */
 static int anime_form_usable(int folder) {
@@ -3179,8 +3192,8 @@ static int anime_form_usable(int folder) {
     if (!TexPack_AnimeFolderIsForm(folder)) {
         return 1;
     }
-    for (s = 0; s < 16; s++) {
-        if (sFormSeen[s].folder == folder + 1 && sFormSeen[s].frame + ANIME_FORM_HOLD >= gGsFrame) {
+    for (s = 0; s < 32; s++) {
+        if (form_seen(s, folder, -1)) {
             return 1;
         }
     }
@@ -3188,17 +3201,18 @@ static int anime_form_usable(int folder) {
 }
 
 static int anime_form(void) {
-    int f, s, any = -1;
+    int f, s, any = -1, row = sAnimeStrip.row;
     for (f = 0; f < sAnimeStrip.forms; f++) {
         if (TexPack_AnimeIsMarker(sAnimeStrip.entry[f])) {
             int folder = TexPack_AnimeFolder(sAnimeStrip.entry[f]), oldest = 0;
-            for (s = 0; s < 16 && sFormSeen[s].folder != folder + 1; s++) {
+            for (s = 0; s < 32 && !(sFormSeen[s].folder == folder + 1 && sFormSeen[s].row == row); s++) {
                 if (sFormSeen[s].frame < sFormSeen[oldest].frame) {
                     oldest = s;
                 }
             }
-            s = s < 16 ? s : oldest;
+            s = s < 32 ? s : oldest;
             sFormSeen[s].folder = folder + 1;
+            sFormSeen[s].row = row;
             sFormSeen[s].frame = gGsFrame;
             return f;
         }
@@ -3209,8 +3223,8 @@ static int anime_form(void) {
             any = any < 0 ? f : any;
             continue;
         }
-        for (s = 0; s < 16; s++) {
-            if (sFormSeen[s].folder == folder + 1 && sFormSeen[s].frame + ANIME_FORM_HOLD >= gGsFrame) {
+        for (s = 0; s < 32; s++) {
+            if (form_seen(s, folder, row)) {
                 return f;
             }
         }
@@ -3329,6 +3343,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         sAnimeStrip.vertices = vertices;
         sAnimeStrip.count = count;
         sAnimeStrip.forms = sLast->animeCount;
+        sAnimeStrip.row = sLast->arow;
         for (f = 0; f < sLast->animeCount; f++) {
             sAnimeStrip.anime[f] = sLast->anime[f];
             sAnimeStrip.cut[f] = sLast->animeCut[f];
