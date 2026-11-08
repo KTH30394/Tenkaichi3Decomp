@@ -3548,7 +3548,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         a.orig[2] = (float)anime_shell(); /* the inside-out outline shell left to the game (gs.frag) */
         /* the tones in the texture (2, or 3 with a middle one: gs_texpack.h TexPack_AnimeMid), and half the middle
            tone's width along the ramp */
-        a.rect[0] = sAnimeStrip.tones[form] == 3 ? (float)TexPack_AnimeMid(sAnimeStrip.entry[form]) / 600.0f : 0.0f;
+        a.rect[0] = sAnimeStrip.tones[form] == 3 ? (float)TexPack_AnimeMid(sAnimeStrip.entry[form]) / 200.0f : 0.0f;
         a.rect[1] = (float)sAnimeStrip.tones[form];
         a.rect[2] = a.rect[3] = 0.0f;
         if (a.orig[2] != 0.0f && gsVuIdxCount + (count - 2) * 3 <= MAX_VU_IDX) {

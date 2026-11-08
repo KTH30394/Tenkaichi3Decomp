@@ -64,7 +64,7 @@ static uint32_t *sAnimeIds, sAnimeCount;
 typedef struct AnimeFolder {
     char *dir;
     int cut;           /* anime_cut.txt */
-    int mid;           /* anime_mid.txt: how wide the middle tone of a three tone texture is (0..100, default 30) */
+    int mid;           /* anime_mid.txt: how much of the ramp the middle tone of a three tone texture takes (percent, default 30) */
     int form;         /* anime_form.txt is there: a form of a fighter (TexPack_AnimeFolderIsForm) */
     uint64_t *markers; /* and the texture hashes in it: textures only that form has (TexPack_AnimeIsMarker) */
     int markerCount;

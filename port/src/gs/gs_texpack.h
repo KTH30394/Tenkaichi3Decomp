@@ -71,7 +71,8 @@ int TexPack_AnimeView(int id);
 int TexPack_AnimeUpStrip(int id, uint32_t uv);
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
 /* Three tones: a file four times the texture's height (lit, middle, shadow, the original) has a middle tone between
-   light and shadow, as wide as "anime_mid.txt" in its folder says (0..100 of the ramp's third; 30 without one). Only
+   light and shadow, as wide as "anime_mid.txt" in its folder says (percent of the ramp, centred on the edge: 50 = the
+   middle tone half of it, light and shadow a quarter each; 30 without one). Only
    the files made that way: those of two (twice or three times the height) are drawn as before. */
 int TexPack_AnimeMid(int id);
 void TexPack_Free(TexPackImage *img);
