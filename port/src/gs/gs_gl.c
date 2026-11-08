@@ -952,6 +952,13 @@ static void frame_end(void) {
             params[0] = 1333.333f / (float)Port_PageAspectMilli() / (float)GS_W; /* one PS2 pixel across, as wide as at 4:3 (outline.frag) */
             params[1] = 1.0f / (float)GS_H;
             params[2] = 100.0f / 255.0f;
+            if (d->native == 1) { /* the outline: as dark and as thick as textures/anime_outline.txt says */
+                float dark, wide;
+                GsDraw_OutlineLook(&dark, &wide);
+                params[0] *= wide;
+                params[1] *= wide;
+                params[2] = dark / 255.0f;
+            }
             params[3] = getenv("BT3_FX_DEBUG") != NULL ? 1.0f : 0.0f;
             set_params(params, 16);
             haveFu = 0;

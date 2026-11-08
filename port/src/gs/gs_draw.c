@@ -253,6 +253,7 @@ typedef struct Tex {
     float avg[3];            /* its average colour, weighted by alpha, 0..1 (an energy light's colour is in its texture) */
     GsTex anime[ANIME_FORMS];   /* its anime colours from the texture pack (TexPack_LoadAnime), one a form of the fighter */
     float animeCut[ANIME_FORMS]; /* and how far each one's edge moves towards the shadow side (anime_cut.txt) */
+    int animeTones[ANIME_FORMS]; /* and 2, or 3 with a middle tone (TexPack_AnimeMid) */
     int animeEntry[ANIME_FORMS]; /* (the pack's entries: TexPack_AnimeRamps) */
     int animeCount;
     uint32_t rampHash;       /* a shading ramp: its colours as they are, a little rounded */
@@ -721,14 +722,15 @@ static void pack_arrived(Tex *c) {
 static struct { int id; uint32_t w, h; uint32_t *px; } sAnimeOrig[64];
 static unsigned sAnimeOrigNext;
 
-static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, uint32_t h, float *cut) {
+static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, uint32_t h, float *cut, int *tones) {
     TexPackImage img;
-    int c = 0, k, slot = -1;
+    int c = 0, k, slot = -1, n = 2;
     uint32_t i, x, y;
     GsTex tex;
     const uint8_t *fileOriginal = NULL; /* the original as the file keeps it (its third block), if it does */
 
     *cut = 0.0f;
+    *tones = 2;
     for (k = 0; k < 64; k++) {
         if (sAnimeOrig[k].px != NULL && sAnimeOrig[k].id == id) {
             slot = k;
@@ -775,15 +777,17 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
         img = held[found].img;
         c = held[found].cut;
     }
-    if (img.format != GS_TEXFMT_RGBA8 || img.w != w || (img.h != 2 * h && img.h != 3 * h)) {
+    if (img.format != GS_TEXFMT_RGBA8 || img.w != w || (img.h != 2 * h && img.h != 3 * h && img.h != 4 * h)) {
         return 0;
     }
-    /* A third block under the two (gs_texpack.h): the texture as it was when its anime colours were made. Only the
-       two are uploaded. */
-    if (img.h == 3 * h) {
-        fileOriginal = img.data[0] + (size_t)w * h * 2 * 4;
-        img.h = 2 * h;
-        img.bytes[0] = w * h * 2 * 4;
+    /* Four blocks: three tones (lit, middle, shadow) and the original (gs_texpack.h, TexPack_AnimeMid) */
+    n = img.h == 4 * h ? 3 : 2;
+    /* A block under the colours (gs_texpack.h): the texture as it was when its anime colours were made. Only the
+       colours are uploaded. */
+    if (img.h == (uint32_t)(n + 1) * h) {
+        fileOriginal = img.data[0] + (size_t)w * h * n * 4;
+        img.h = n * h;
+        img.bytes[0] = w * h * n * 4;
         img.levels = 1;
     }
     if (other) {
@@ -792,7 +796,7 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
            in this session, else the copy in the file's third block; without either, or where this is darker than the
            original nearly everywhere (another fighter's colours on the same texture), nothing. */
         uint32_t darker = 0;
-        const uint8_t *o = NULL, *n = (const uint8_t *)px;
+        const uint8_t *o = NULL, *px8 = (const uint8_t *)px;
         uint8_t *a;
         if (slot >= 0 && sAnimeOrig[slot].w == w && sAnimeOrig[slot].h == h) {
             o = (const uint8_t *)sAnimeOrig[slot].px;
@@ -803,30 +807,30 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
             return 0;
         }
         for (i = 0; i < w * h; i++) {
-            darker += n[i * 4] + 10 < o[i * 4] || n[i * 4 + 1] + 10 < o[i * 4 + 1] || n[i * 4 + 2] + 10 < o[i * 4 + 2];
+            darker += px8[i * 4] + 10 < o[i * 4] || px8[i * 4 + 1] + 10 < o[i * 4 + 1] || px8[i * 4 + 2] + 10 < o[i * 4 + 2];
         }
         if (darker > w * h / 20) {
             return 0;
         }
         /* (a copy: the one held stays the original's) */
-        a = (uint8_t *)malloc((size_t)w * h * 2 * 4);
+        a = (uint8_t *)malloc((size_t)w * h * n * 4);
         if (a == NULL) {
             return 0;
         }
-        memcpy(a, img.data[0], (size_t)w * h * 2 * 4);
+        memcpy(a, img.data[0], (size_t)w * h * n * 4);
         img.data[0] = a;
-        img.bytes[0] = w * h * 2 * 4;
+        img.bytes[0] = w * h * n * 4;
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
                 for (k = 0; k < 3; k++) {
-                    int add = (int)n[(y * w + x) * 4 + k] - (int)o[(y * w + x) * 4 + k], v;
+                    int add = (int)px8[(y * w + x) * 4 + k] - (int)o[(y * w + x) * 4 + k], v, b;
                     if (add <= 0) {
                         continue;
                     }
-                    v = a[(y * w + x) * 4 + k] + add;
-                    a[(y * w + x) * 4 + k] = (uint8_t)(v > 255 ? 255 : v);
-                    v = a[((y + h) * w + x) * 4 + k] + add;
-                    a[((y + h) * w + x) * 4 + k] = (uint8_t)(v > 255 ? 255 : v);
+                    for (b = 0; b < n; b++) {
+                        v = a[((y + b * h) * w + x) * 4 + k] + add;
+                        a[((y + b * h) * w + x) * 4 + k] = (uint8_t)(v > 255 ? 255 : v);
+                    }
                 }
             }
         }
@@ -837,6 +841,7 @@ static GsTex anime_texture(int id, int other, const uint32_t *px, uint32_t w, ui
         tex = pack_texture(&img);
     }
     *cut = (float)c / 300.0f; /* (as bt3.look cut: up to a third of the ramp) */
+    *tones = tex != 0 ? n : 2;
     return tex;
 }
 
@@ -968,7 +973,7 @@ static GsTex texture_get(int ctx) {
     int animeIds[ANIME_FORMS], animeFound = 0, animeOther = 0, animeCount = 0, f;
     GsTex animeTex[ANIME_FORMS];
     float animeCut[ANIME_FORMS];
-    int animeEntry[ANIME_FORMS];
+    int animeEntry[ANIME_FORMS], animeTones[ANIME_FORMS];
     uint32_t rampHash = 0, packName = 0;
     int rampFlat = 0;
     if (toonSharp > 0) { gen ^= 0x70017000u + (uint32_t)toonSharp * 0x9E3779B1u + (uint32_t)toonCut * 0x85EBCA77u; }
@@ -1139,7 +1144,8 @@ static GsTex texture_get(int ctx) {
     }
     for (f = 0; f < animeFound && !replaced && !menuText && px != NULL && rw == tw && rh == th; f++) {
         if (sBackend->texSlotsLeft() > 1) {
-            animeTex[animeCount] = anime_texture(animeIds[f], animeOther, px, tw, th, &animeCut[animeCount]);
+            animeTex[animeCount] = anime_texture(animeIds[f], animeOther, px, tw, th, &animeCut[animeCount],
+                                                 &animeTones[animeCount]);
             animeEntry[animeCount] = animeIds[f];
             animeCount += animeTex[animeCount] != 0;
         }
@@ -1209,6 +1215,7 @@ static GsTex texture_get(int ctx) {
         t->anime[f] = animeTex[f];
         t->animeCut[f] = animeCut[f];
         t->animeEntry[f] = animeEntry[f];
+        t->animeTones[f] = animeTones[f];
     }
     t->rampHash = rampHash;
     t->rampFlat = rampFlat;
@@ -2384,6 +2391,7 @@ static struct {
     GsTex anime[ANIME_FORMS];
     float cut[ANIME_FORMS];
     int entry[ANIME_FORMS];
+    int tones[ANIME_FORMS];
     int forms;
     int sampler;
 } sAnimeStrip;
@@ -2402,6 +2410,28 @@ static uint32_t strip_uv_hash(const float *vertices, uint32_t count) {
         h = (h ^ bits) * 16777619u;
     }
     return h;
+}
+
+void GsDraw_OutlineLook(float *darkness, float *width) {
+    static int read;
+    static float dark = 100.0f, wide = 1.0f;
+    if (!read) {
+        FILE *f = fopen("textures/anime_outline.txt", "r");
+        read = 1;
+        if (f != NULL) {
+            float d, w;
+            int n = fscanf(f, "%f %f", &d, &w);
+            if (n >= 1 && d >= 0.0f && d <= 255.0f) {
+                dark = d;
+            }
+            if (n >= 2 && w >= 0.5f && w <= 3.0f) {
+                wide = w;
+            }
+            fclose(f);
+        }
+    }
+    *darkness = dark;
+    *width = wide;
 }
 
 /* Which way the outline shell faces on the screen, for gs.frag mode 4 (orig.z): 1 = away, 2 = this way, 0 = the anime
@@ -2577,6 +2607,7 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             sAnimeStrip.anime[f] = sLast->anime[f];
             sAnimeStrip.cut[f] = sLast->animeCut[f];
             sAnimeStrip.entry[f] = sLast->animeEntry[f];
+            sAnimeStrip.tones[f] = sLast->animeTones[f];
         }
         sAnimeStrip.sampler = d.sampler;
     }
@@ -2773,6 +2804,11 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         a.orig[0] = -rampDir;
         a.orig[1] = (sAnimeStrip.sampler & 4) ? 1.0f : 0.0f; /* the layer 0 texture clamped in v (else repeated) */
         a.orig[2] = (float)anime_shell(); /* the inside-out outline shell left to the game (gs.frag) */
+        /* the tones in the texture (2, or 3 with a middle one: gs_texpack.h TexPack_AnimeMid), and half the middle
+           tone's width along the ramp */
+        a.rect[0] = sAnimeStrip.tones[form] == 3 ? (float)TexPack_AnimeMid(sAnimeStrip.entry[form]) / 600.0f : 0.0f;
+        a.rect[1] = (float)sAnimeStrip.tones[form];
+        a.rect[2] = a.rect[3] = 0.0f;
         if (a.orig[2] != 0.0f && gsVuIdxCount + (count - 2) * 3 <= MAX_VU_IDX) {
             /* A strip's triangles turn the other way every second one; listed as they come (layer 1's list), half of
                them would face the other way on the screen. Here every second one is listed the other way round, so

@@ -64,6 +64,10 @@ int TexPack_AnimeView(int id);
    shares its texture with others (Freezer's head dome, his shoulder pads). */
 int TexPack_AnimeUpStrip(int id, uint32_t uv);
 int TexPack_LoadAnime(int id, TexPackImage *img, int *cut);
+/* Three tones: a file four times the texture's height (lit, middle, shadow, the original) has a middle tone between
+   light and shadow, as wide as "anime_mid.txt" in its folder says (0..100 of the ramp's third; 30 without one). Only
+   the files made that way: those of two (twice or three times the height) are drawn as before. */
+int TexPack_AnimeMid(int id);
 void TexPack_Free(TexPackImage *img);
 
 #endif

@@ -64,7 +64,8 @@ static uint32_t *sAnimeIds, sAnimeCount;
 typedef struct AnimeFolder {
     char *dir;
     int cut;           /* anime_cut.txt */
-    int form;          /* anime_form.txt is there: a form of a fighter (TexPack_AnimeFolderIsForm) */
+    int mid;           /* anime_mid.txt: how wide the middle tone of a three tone texture is (0..100, default 30) */
+    int form;         /* anime_form.txt is there: a form of a fighter (TexPack_AnimeFolderIsForm) */
     uint64_t *markers; /* and the texture hashes in it: textures only that form has (TexPack_AnimeIsMarker) */
     int markerCount;
     uint64_t *hair;    /* anime_hair.txt: the texture hashes of the hair (TexPack_AnimeIsHair) */
@@ -121,6 +122,15 @@ static int folder_of(const char *dir) {
     if (f != NULL) {
         if (fscanf(f, "%d", &a->cut) != 1 || a->cut < -100 || a->cut > 100) {
             a->cut = 0;
+        }
+        fclose(f);
+    }
+    a->mid = 30;
+    snprintf(path, sizeof(path), "%sanime_mid.txt", dir);
+    f = fopen(path, "r");
+    if (f != NULL) {
+        if (fscanf(f, "%d", &a->mid) != 1 || a->mid < 0 || a->mid > 100) {
+            a->mid = 30;
         }
         fclose(f);
     }
@@ -643,6 +653,11 @@ int TexPack_LoadAnime(int id, TexPackImage *img, int *cut) {
     }
     *cut = sFolders[sEntries[id].folder].cut;
     return load(sEntries[id].path, img);
+}
+
+int TexPack_AnimeMid(int id) {
+    int folder = TexPack_AnimeFolder(id);
+    return folder >= 0 ? sFolders[folder].mid : 30;
 }
 
 void TexPack_Free(TexPackImage *img) {
