@@ -1170,6 +1170,136 @@ static int anime_derive(uint64_t texHash, const uint32_t *px, uint32_t w, uint32
             }
         }
     }
+    /* First, the nearest of the fighter's own files: the same face with another expression, or broken, is the same
+       picture's colours in a palette a few steps off (Goku (Mid)'s broken face: its eyebrows 40 steps bluer than those
+       of the face it was made from). Of the files of its size of the folders drawn in the last frames (a form only
+       while it is on the screen), the one whose colours are nearest to this one's, colour by colour, weighed by how
+       much of the picture each is: each colour of this then takes the lit and shadow colour of its nearest there. */
+    {
+        uint32_t nc = 0, cnt[256], col[256], best = 0, bestErr = ~0u;
+        int bestId = -1, rr;
+        for (i = 0; i < w * h; i++) {
+            uint32_t key = (uint32_t)p[i * 4] << 16 | (uint32_t)p[i * 4 + 1] << 8 | p[i * 4 + 2], q;
+            for (q = 0; q < nc && col[q] != key; q++) {
+            }
+            if (q == nc) {
+                if (nc == 256) {
+                    break;
+                }
+                col[nc] = key;
+                cnt[nc++] = 0;
+            }
+            cnt[q]++;
+        }
+        for (rr = 0; rr < 8 && i == w * h; rr++) {
+            int folder = sAnimeRecent[rr].folder - 1, ids[64], ne, e;
+            if (folder < 0 || sAnimeRecent[rr].frame + 10 < gGsFrame || !anime_form_usable(folder)) {
+                continue;
+            }
+            ne = TexPack_AnimeFolderEntries(folder, ids, 64);
+            for (e = 0; e < ne; e++) {
+                TexPackImage img;
+                int cut, nb;
+                const uint8_t *orig;
+                uint32_t fc[256], nf = 0, q, j, err = 0, worstBig = 0;
+                if (TexPack_AnimeIsHidden(ids[e]) || TexPack_AnimeIsGloss(ids[e]) || !anime_held(ids[e], &img, &cut) ||
+                    img.format != GS_TEXFMT_RGBA8 || img.w != w || (img.h != 3 * h && img.h != 4 * h)) {
+                    continue;
+                }
+                nb = img.h == 4 * h ? 4 : 3;
+                orig = img.data[0] + (size_t)w * h * (nb - 1) * 4;
+                for (j = 0; j < w * h && nf < 256; j++) {
+                    uint32_t key = (uint32_t)orig[j * 4] << 16 | (uint32_t)orig[j * 4 + 1] << 8 | orig[j * 4 + 2];
+                    for (q = 0; q < nf && fc[q] != key; q++) {
+                    }
+                    if (q == nf) {
+                        fc[nf++] = key;
+                    }
+                }
+                for (q = 0; q < nc; q++) {
+                    uint32_t bd = ~0u;
+                    for (j = 0; j < nf; j++) {
+                        int dr = (int)(col[q] >> 16) - (int)(fc[j] >> 16), dg = (int)(col[q] >> 8 & 255) - (int)(fc[j] >> 8 & 255),
+                            db = (int)(col[q] & 255) - (int)(fc[j] & 255);
+                        uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+                        bd = d < bd ? d : bd;
+                    }
+                    bd = (uint32_t)sqrt((double)bd);
+                    err += bd * cnt[q];
+                    if (cnt[q] * 50 > w * h && bd > worstBig) {
+                        worstBig = bd;
+                    }
+                }
+                /* (near: on average within 8 steps, and no colour of a fiftieth of the picture more than 48 off) */
+                if (err <= 8u * w * h && worstBig <= 48 && err < bestErr) {
+                    bestErr = err;
+                    bestId = ids[e];
+                    best = (uint32_t)nb;
+                }
+            }
+        }
+        if (bestId >= 0) {
+            TexPackImage img;
+            int cut;
+            uint8_t *a = malloc((size_t)w * h * 8);
+            uint32_t q, j;
+            const uint8_t *orig, *lit, *sh;
+            anime_held(bestId, &img, &cut);
+            orig = img.data[0] + (size_t)w * h * (best - 1) * 4;
+            lit = img.data[0];
+            sh = img.data[0] + (size_t)w * h * (best - 2) * 4;
+            for (q = 0; q < nc; q++) {
+                /* this colour's nearest there, and the lit and shadow colour of the first of its texels there */
+                uint32_t bd = ~0u, at = 0;
+                for (j = 0; j < w * h; j++) {
+                    int dr = (int)(col[q] >> 16) - orig[j * 4], dg = (int)(col[q] >> 8 & 255) - orig[j * 4 + 1],
+                        db = (int)(col[q] & 255) - orig[j * 4 + 2];
+                    uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+                    if (d < bd) {
+                        bd = d;
+                        at = j;
+                        if (d == 0) {
+                            break;
+                        }
+                    }
+                }
+                cnt[q] = at; /* (from here on: where its colours are) */
+            }
+            for (i = 0; i < w * h; i++) {
+                uint32_t key = (uint32_t)p[i * 4] << 16 | (uint32_t)p[i * 4 + 1] << 8 | p[i * 4 + 2], at;
+                for (q = 0; q < nc && col[q] != key; q++) {
+                }
+                at = cnt[q];
+                memcpy(a + (size_t)i * 4, lit + (size_t)at * 4, 4);
+                memcpy(a + ((size_t)w * h + i) * 4, sh + (size_t)at * 4, 4);
+                if (lit[at * 4 + 3] < 128) { /* a line there: left to the game here too */
+                    a[i * 4 + 3] = 0;
+                    a[((size_t)w * h + i) * 4 + 3] = 0;
+                }
+            }
+            {
+                unsigned slot = sDerivedNext++ % 48;
+                free(sDerived[slot].orig);
+                free(sDerived[slot].anime);
+                sDerived[slot].tex = texHash;
+                sDerived[slot].w = w;
+                sDerived[slot].h = h;
+                sDerived[slot].orig = malloc((size_t)w * h * 4);
+                memcpy(sDerived[slot].orig, p, (size_t)w * h * 4);
+                sDerived[slot].anime = malloc((size_t)w * h * 8);
+                memcpy(sDerived[slot].anime, a, (size_t)w * h * 8);
+                sDerived[slot].entry = bestId;
+            }
+            if (getenv("BT3_ANIME_LOG") != NULL) {
+                fprintf(stderr, "anime: made for %016llx %ux%u from the nearest file, %s (%.1f steps off)\n",
+                        (unsigned long long)texHash, w, h, TexPack_Path(bestId), (double)bestErr / (w * h));
+            }
+            *out = a;
+            *entry = bestId;
+            free(p);
+            return 1;
+        }
+    }
     /* the folders drawn in the last frames, the one most of this picture's colours are in first: with several of a
        fighter's forms sharing colours, the one on the screen (a form only while it is drawn: anime_form) */
     int order[8], no = 0, ex[8];
