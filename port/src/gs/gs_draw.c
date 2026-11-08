@@ -1093,6 +1093,41 @@ static int anime_table(int folder) {
    picture it was made from, so the same face lit otherwise for a scene (a palette tinted) keeps them (anime_fit).
    1 = *img holds them (twice the height, freed by the caller) and *entry the file whose strips' settings they take. */
 static int anime_form_usable(int folder); /* (below, with the forms seen) */
+
+/* (anime_derive) two colours (0xRRGGBB) not of one kind: one with colour and the other grey or white (an iris and the
+   white of the eye), or both with colour and hues more than 40 degrees apart (an iris and the skin). Dark ones are not
+   told apart (lines). */
+static int anime_hue_far(uint32_t a, uint32_t b) {
+    float hs[2][3];
+    uint32_t c[2] = {a, b};
+    int i;
+    for (i = 0; i < 2; i++) {
+        float r = (float)(c[i] >> 16 & 255) / 255.0f, g = (float)(c[i] >> 8 & 255) / 255.0f, bl = (float)(c[i] & 255) / 255.0f;
+        float mx = r > g ? (r > bl ? r : bl) : (g > bl ? g : bl), mn = r < g ? (r < bl ? r : bl) : (g < bl ? g : bl);
+        float l = (mx + mn) / 2.0f, d = mx - mn, h = 0.0f;
+        float s = d == 0.0f ? 0.0f : l > 0.5f ? d / (2.0f - mx - mn) : d / (mx + mn);
+        if (d != 0.0f) {
+            h = mx == r ? 60.0f * fmodf((g - bl) / d, 6.0f) : mx == g ? 60.0f * ((bl - r) / d + 2.0f) : 60.0f * ((r - g) / d + 4.0f);
+            h = h < 0.0f ? h + 360.0f : h;
+        }
+        hs[i][0] = h;
+        hs[i][1] = s;
+        hs[i][2] = l;
+    }
+    if (hs[0][2] < 0.15f || hs[1][2] < 0.15f) {
+        return 0;
+    }
+    if (fabsf(hs[0][1] - hs[1][1]) > 0.3f) {
+        return 1;
+    }
+    if (hs[0][1] < 0.2f || hs[1][1] < 0.2f) {
+        return 0;
+    }
+    {
+        float dh = fabsf(hs[0][0] - hs[1][0]);
+        return (dh > 180.0f ? 360.0f - dh : dh) > 40.0f;
+    }
+}
 /* The alpha bytes each folder's textures had as they were drawn in this session (a bit each): a fighter's palettes
    carry its object number there (each fighter its own in a fight), so a texture with other ones is another fighter's */
 static uint32_t sFolderAlpha[64][8];
@@ -1286,6 +1321,7 @@ static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, ui
                off went to a skin shade nearer to them and lost their colour). Only where that is far off (more than 64
                steps: a scratch on skin, something the file does not have there), the nearest colour of the file. */
             uint32_t fc[256], nf = 0, *votes, ref[256];
+            uint8_t leave[256];
             int pix;
             for (j = 0; j < w * h && nf < 256; j++) {
                 uint32_t key = (uint32_t)orig[j * 4] << 16 | (uint32_t)orig[j * 4 + 1] << 8 | orig[j * 4 + 2], m;
@@ -1325,6 +1361,9 @@ static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, ui
                 dr = (int)(col[q] >> 16) - (int)(fc[pick] >> 16);
                 dg = (int)(col[q] >> 8 & 255) - (int)(fc[pick] >> 8 & 255);
                 db = (int)(col[q] & 255) - (int)(fc[pick] & 255);
+                if (top != 0 && m == nf && anime_hue_far(col[q], fc[pick])) {
+                    top = 0; /* by place to another hue (an iris to the skin or the white): the nearest instead */
+                }
                 if (top == 0 || dr * dr + dg * dg + db * db > 64 * 64) {
                     for (m = 0; m < nf; m++) {
                         int er = (int)(col[q] >> 16) - (int)(fc[m] >> 16), eg = (int)(col[q] >> 8 & 255) - (int)(fc[m] >> 8 & 255),
@@ -1337,6 +1376,7 @@ static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, ui
                     }
                 }
                 ref[q] = fc[pick];
+                leave[q] = (uint8_t)anime_hue_far(col[q], fc[pick]); /* nothing of its hue there: left to the game */
                 /* (a texel of the file with that colour: where this one's place does not have it) */
                 cnt[q] = 0;
                 for (j = 0; j < w * h; j++) {
@@ -1356,7 +1396,7 @@ static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, ui
                 at = ((uint32_t)orig[pix * 4] << 16 | (uint32_t)orig[pix * 4 + 1] << 8 | orig[pix * 4 + 2]) == ref[q] ? (uint32_t)pix : cnt[q];
                 memcpy(a + (size_t)pix * 4, lit + (size_t)at * 4, 4);
                 memcpy(a + ((size_t)w * h + pix) * 4, sh + (size_t)at * 4, 4);
-                if (lit[at * 4 + 3] < 128) { /* a line there: left to the game here too */
+                if (lit[at * 4 + 3] < 128 || leave[q]) { /* a line there (or nothing of its hue): left to the game here too */
                     a[pix * 4 + 3] = 0;
                     a[((size_t)w * h + pix) * 4 + 3] = 0;
                 }
