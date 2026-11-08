@@ -1084,6 +1084,35 @@ static int anime_table(int folder) {
    few steps): another fighter's or the stage's textures are other colours. Kept by the texture's hash, with the
    picture it was made from, so the same face lit otherwise for a scene (a palette tinted) keeps them (anime_fit).
    1 = *img holds them (twice the height, freed by the caller) and *entry the file whose strips' settings they take. */
+static int anime_form_usable(int folder); /* (below, with the forms seen) */
+/* The alpha bytes each folder's textures had as they were drawn in this session (a bit each): a fighter's palettes
+   carry its object number there (each fighter its own in a fight), so a texture with other ones is another fighter's */
+static uint32_t sFolderAlpha[64][8];
+
+static void anime_alpha_note(int folder, const uint32_t *px, uint32_t count) {
+    uint32_t i;
+    if (folder < 0 || folder >= 64) {
+        return;
+    }
+    for (i = 0; i < count; i++) {
+        uint32_t a = px[i] >> 24;
+        sFolderAlpha[folder][a >> 5] |= 1u << (a & 31);
+    }
+}
+
+static int anime_alpha_same(int folder, const uint32_t *px, uint32_t count) {
+    uint32_t i;
+    if (folder < 0 || folder >= 64) {
+        return 0;
+    }
+    for (i = 0; i < count; i++) {
+        uint32_t a = px[i] >> 24;
+        if (!(sFolderAlpha[folder][a >> 5] & (1u << (a & 31)))) {
+            return 0;
+        }
+    }
+    return 1;
+}
 static struct { uint64_t tex; uint32_t w, h; uint8_t *orig, *anime; int entry; } sDerived[48];
 static unsigned sDerivedNext;
 
@@ -1141,11 +1170,40 @@ static int anime_derive(uint64_t texHash, const uint32_t *px, uint32_t w, uint32
             }
         }
     }
+    /* the folders drawn in the last frames, the one most of this picture's colours are in first: with several of a
+       fighter's forms sharing colours, the one on the screen (a form only while it is drawn: anime_form) */
+    int order[8], no = 0, ex[8];
     for (r = 0; r < 8; r++) {
-        int t, folder = sAnimeRecent[r].folder - 1, *at;
+        int t, folder = sAnimeRecent[r].folder - 1, q;
+        uint32_t hits = 0;
+        if (folder < 0 || sAnimeRecent[r].frame + 10 < gGsFrame || !anime_form_usable(folder) ||
+            !anime_alpha_same(folder, px, w * h) || (t = anime_table(folder)) < 0) {
+            continue;
+        }
+        for (i = 0; i < w * h; i += 7) {
+            uint32_t key = (uint32_t)p[i * 4] << 16 | (uint32_t)p[i * 4 + 1] << 8 | p[i * 4 + 2];
+            int lo = 0, hi = sAnimeTable[t].n - 1;
+            while (lo <= hi) {
+                int mid = (lo + hi) / 2;
+                if (sAnimeTable[t].c[mid].key == key) { hits++; break; }
+                if (sAnimeTable[t].c[mid].key < key) lo = mid + 1; else hi = mid - 1;
+            }
+        }
+        for (q = no; q > 0 && ex[q - 1] < (int)hits; q--) {
+            order[q] = order[q - 1];
+            ex[q] = ex[q - 1];
+        }
+        order[q] = r;
+        ex[q] = (int)hits;
+        no++;
+    }
+    for (s = 0; s < no; s++) {
+        int t, folder, *at;
         uint32_t exact = 0, near = 0, miss = 0;
         uint8_t *a;
-        if (folder < 0 || sAnimeRecent[r].frame + 10 < gGsFrame || (t = anime_table(folder)) < 0) {
+        r = order[s];
+        folder = sAnimeRecent[r].folder - 1;
+        if ((t = anime_table(folder)) < 0) {
             continue;
         }
         /* first the exact colours, given up as soon as a fifth of the picture is not (most textures: at once) */
@@ -1523,6 +1581,9 @@ static GsTex texture_get(int ctx) {
             animeEntry[animeCount] = animeIds[f];
             animeCount += animeTex[animeCount] != 0;
         }
+    }
+    for (f = 0; f < animeCount && px != NULL; f++) {
+        anime_alpha_note(TexPack_AnimeFolder(animeEntry[f]), px, tw * th);
     }
     if (animeFound == 0 && !sToonWanted && sTexPackOn && TexPack_Count() != 0 && bits <= 8 && !replaced && !menuText &&
         px != NULL && rw == tw && rh == th && sBackend->texSlotsLeft() > 1) {
@@ -2857,6 +2918,20 @@ static int anime_shell(void) {
    half second: a frame without the hair, or a blink, does not switch the colours off and on). Else a folder for any. */
 #define ANIME_FORM_HOLD 30
 static struct { int folder; unsigned frame; } sFormSeen[16];
+
+/* (anime_derive) a folder whose colours would be drawn now: not a form, or a form one of whose textures was just drawn */
+static int anime_form_usable(int folder) {
+    int s;
+    if (!TexPack_AnimeFolderIsForm(folder)) {
+        return 1;
+    }
+    for (s = 0; s < 16; s++) {
+        if (sFormSeen[s].folder == folder + 1 && sFormSeen[s].frame + ANIME_FORM_HOLD >= gGsFrame) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static int anime_form(void) {
     int f, s, any = -1;
