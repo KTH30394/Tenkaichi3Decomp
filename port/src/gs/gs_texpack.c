@@ -576,6 +576,20 @@ int TexPack_AnimeSiblings(int id, int *ids, int max) {
     return n;
 }
 
+uint64_t TexPack_AnimeFoldersMarking(uint64_t tex) {
+    uint64_t mask = 0;
+    int f, k;
+    for (f = 0; f < sFolderCount && f < 64; f++) {
+        for (k = 0; k < sFolders[f].markerCount; k++) {
+            if (sFolders[f].markers[k] == tex) {
+                mask |= 1ull << f;
+                break;
+            }
+        }
+    }
+    return mask;
+}
+
 int TexPack_AnimeFolderEntries(int folder, int *ids, int max) {
     int n = 0;
     uint32_t i;

@@ -46,6 +46,10 @@ int TexPack_AnimeFind(int *ids, int max, int *other);
 int TexPack_AnimeSiblings(int id, int *ids, int max);
 /* The anime entries of a folder, at most `max` (gs_draw.c anime_derive: a fighter's colours read from all of them) */
 int TexPack_AnimeFolderEntries(int folder, int *ids, int max);
+/* The form folders (a bit each, the first 64) whose anime_form.txt lists this texture hash: a fighter drawing it is that
+   form, also where the texture has no file in that folder (a folder of pieces several forms share, the gold of
+   Broly's three forms, told apart by each form's own face or clothes). */
+uint64_t TexPack_AnimeFoldersMarking(uint64_t tex);
 uint64_t TexPack_LastTex(void); /* the texture hash the last TexPack_Lookup worked out (its name's first part), 0 = none */
 int TexPack_AnimeFolder(int id);
 int TexPack_AnimeFolderIsForm(int folder);
