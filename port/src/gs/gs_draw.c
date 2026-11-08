@@ -236,7 +236,7 @@ static uint64_t gpu_now(void) {
     return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
 }
 
-#define ANIME_FORMS 4 /* forms of one fighter sharing a texture, each with its anime colours (gs_texpack.h) */
+#define ANIME_FORMS 8 /* forms of one fighter sharing a texture, each with its anime colours (gs_texpack.h) */
 
 /* GS memory -> an RGBA texture, cached by TEX0 / TEXA and the content of the pages it occupies. */
 typedef struct Tex {
