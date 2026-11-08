@@ -576,6 +576,17 @@ int TexPack_AnimeSiblings(int id, int *ids, int max) {
     return n;
 }
 
+int TexPack_AnimeFolderEntries(int folder, int *ids, int max) {
+    int n = 0;
+    uint32_t i;
+    for (i = 0; i < sAnimeCount && n < max; i++) {
+        if (sEntries[sAnimeIds[i]].folder == folder) {
+            ids[n++] = (int)sAnimeIds[i];
+        }
+    }
+    return n;
+}
+
 uint64_t TexPack_LastTex(void) {
     return sLookup.valid ? sLookup.tex : 0;
 }

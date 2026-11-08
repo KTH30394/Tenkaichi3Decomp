@@ -44,6 +44,8 @@ int TexPack_AnimeFind(int *ids, int max, int *other);
    expressions of a pair of eyes, each its own palette. gs_draw.c takes the one whose original is nearest to a palette
    it has no file for. */
 int TexPack_AnimeSiblings(int id, int *ids, int max);
+/* The anime entries of a folder, at most `max` (gs_draw.c anime_derive: a fighter's colours read from all of them) */
+int TexPack_AnimeFolderEntries(int folder, int *ids, int max);
 uint64_t TexPack_LastTex(void); /* the texture hash the last TexPack_Lookup worked out (its name's first part), 0 = none */
 int TexPack_AnimeFolder(int id);
 int TexPack_AnimeFolderIsForm(int folder);
