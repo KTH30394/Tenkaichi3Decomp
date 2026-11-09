@@ -1886,6 +1886,25 @@ static GsTex texture_get(int ctx) {
     if (toonSharp > 0 && !replaced && !menuText && px != NULL) {
         uint32_t sw = 0, sh = 0;
         uint32_t *sharp = toon_sharpen(px, tw, th, toonSharp, toonCut, &sw, &sh, &toonEdge, &toonDir);
+        if (getenv("BT3_ANIME_LOG") != NULL) {
+            /* (each new ramp once: where its edge came out and its first row, to compare light / shadow between builds) */
+            static uint32_t seenE[256];
+            static unsigned seenENext;
+            unsigned s;
+            for (s = 0; s < 256 && seenE[s] != rampHash; s++) {}
+            if (s == 256) {
+                char rowTxt[200];
+                int at = 0;
+                uint32_t x;
+                seenE[seenENext++ & 255] = rampHash;
+                rowTxt[0] = 0;
+                for (x = 0; x < tw && at < 180; x += (tw + 15) / 16) {
+                    at += snprintf(rowTxt + at, sizeof(rowTxt) - (size_t)at, " %06x", (unsigned)(px[x] & 0xFFFFFFu));
+                }
+                fprintf(stderr, "anime: ramp %08x %ux%u edge %.2f dir %.0f cut %d, first row:%s\n", rampHash, (unsigned)tw,
+                        (unsigned)th, toonEdge, toonDir, toonCut, rowTxt);
+            }
+        }
         if (sharp != NULL) {
             free(px);
             px = sharp;
