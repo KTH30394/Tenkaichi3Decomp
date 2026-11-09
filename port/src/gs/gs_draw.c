@@ -1166,23 +1166,37 @@ static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, ui
 
 /* anime_derive_try, but a texture looked for and not found is not looked for again in a while: a scene's flash
    repaints the palettes every frame while it fades, each a texture decoded anew, and looking through the files each
-   time held the game up (an intro gone by under a frozen picture). The same face found before is quick (sDerived). */
+   time held the game up (an intro gone by under a frozen picture). The same face found before is quick (sDerived).
+   Each failure doubles the wait (2, 4, 8 s) and after the fourth the texture is not looked for again: the other
+   fighter's textures, who has no files, failed every 2 s each, all of them, and the fights went by in jolts. */
 static int anime_derive(uint64_t texHash, const uint32_t *px, uint32_t w, uint32_t h, uint8_t **out, int *entry) {
-    static struct { uint64_t key; unsigned frame; } failed[256];
+    static struct { uint64_t key; unsigned frame, count; } failed[512];
     static unsigned next;
     uint64_t key = texHash ^ ((uint64_t)w << 48) ^ ((uint64_t)h << 36);
-    int q;
-    for (q = 0; q < 256; q++) {
-        if (failed[q].key == key && failed[q].frame + 120 > gGsFrame) {
-            *out = NULL;
-            return 0;
+    int q, slot = -1;
+    for (q = 0; q < 512; q++) {
+        if (failed[q].key == key && failed[q].count != 0) {
+            if (failed[q].count >= 4 || failed[q].frame + (120u << (failed[q].count - 1)) > gGsFrame) {
+                *out = NULL;
+                return 0;
+            }
+            slot = q;
+            break;
         }
     }
     if (anime_derive_try(texHash, px, w, h, out, entry)) {
+        if (slot >= 0) {
+            failed[slot].count = 0;
+        }
         return 1;
     }
-    failed[next & 255].key = key;
-    failed[next++ & 255].frame = gGsFrame;
+    if (slot < 0) {
+        slot = (int)(next++ & 511);
+        failed[slot].key = key;
+        failed[slot].count = 0;
+    }
+    failed[slot].frame = gGsFrame;
+    failed[slot].count++;
     return 0;
 }
 
