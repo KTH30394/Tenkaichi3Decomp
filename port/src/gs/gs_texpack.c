@@ -630,8 +630,8 @@ int TexPack_AnimeFolder(int id) {
    anime_models.txt; with one, only for the models listed (a shared piece of another fighter takes nothing). */
 int TexPack_AnimeFolderAllows(int folder, int model) {
     int k;
-    if (folder < 0 || folder >= sFolderCount || !sFolders[folder].hasModels) {
-        return 1;
+    if (folder < 0 || folder >= sFolderCount || !sFolders[folder].hasModels || model < 0) {
+        return 1; /* (a model not known: as without the list, rather than a fighter without its colours) */
     }
     for (k = 0; k < sFolders[folder].modelCount; k++) {
         if (sFolders[folder].models[k] == model) {

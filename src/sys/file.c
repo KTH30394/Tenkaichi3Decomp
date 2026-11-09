@@ -263,26 +263,23 @@ void File_InitRequests(void) {
 #ifdef PORT
 /* Which file is where: the buffers files were read into (their ids), so a model being bound can say which file it is
    (BtlObjMdl_BindFiles -> Port_AnimeRowModel: anime_models.txt in the texture pack). */
-static struct { const u8 *at; s32 bytes, id; } sFileAt[64];
+/* A ring of the last 1024 reads; looked up newest first: a battle reads a big file (462), frees it and then reads a
+   fighter's model into the same memory, and the older note covering that memory must not win. */
+#define FILE_AT_COUNT 1024
+static struct { const u8 *at; s32 bytes, id; u32 seq; } sFileAt[FILE_AT_COUNT];
 static u32 sFileAtNext;
 static void Port_FileNote(const void *buf, s32 bytes, s32 id) {
-    u32 i;
-    for (i = 0; i < 64; i++) {
-        if (sFileAt[i].at == (const u8 *)buf) {
-            sFileAt[i].bytes = bytes;
-            sFileAt[i].id = id;
-            return;
-        }
-    }
-    i = sFileAtNext++ & 63;
+    u32 i = sFileAtNext & (FILE_AT_COUNT - 1);
     sFileAt[i].at = buf;
     sFileAt[i].bytes = bytes;
     sFileAt[i].id = id;
+    sFileAt[i].seq = ++sFileAtNext;
 }
-/* the id of the file whose buffer holds `p`, -1 = none known */
+/* the id of the file whose buffer holds `p` (the latest read covering it), -1 = none known */
 int Port_FileIdAt(const void *p) {
-    u32 i;
-    for (i = 0; i < 64; i++) {
+    u32 k, n = sFileAtNext < FILE_AT_COUNT ? sFileAtNext : FILE_AT_COUNT;
+    for (k = 0; k < n; k++) {
+        u32 i = (sFileAtNext - 1 - k) & (FILE_AT_COUNT - 1);
         if (sFileAt[i].at != NULL && (const u8 *)p >= sFileAt[i].at && (const u8 *)p < sFileAt[i].at + sFileAt[i].bytes) {
             return sFileAt[i].id;
         }
