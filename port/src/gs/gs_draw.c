@@ -3645,6 +3645,67 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
         }
     }
     if ((layer == 1 || layer == 5 || layer == 3) && rampDir != 0.0f && form >= 0 && Mods_Look()->shading > 0 &&
+        getenv("BT3_ANIME_LOG") != NULL) {
+        /* (where on the ramp this strip's points are, by texture, every 600 frames: compare light and shadow between
+           builds and games; r as vu0.vert layer 7 has it, with bone A only) */
+        static struct { uint32_t tex; unsigned n, lit, hist[20], lwN; double lw; float edge; } rs[48];
+        static unsigned rsCount, rsFrame;
+        const char *path = TexPack_Path(sAnimeStrip.entry[form]), *base = path, *c;
+        uint32_t tex = 0, n;
+        unsigned q;
+        for (c = path; c != NULL && *c; c++) {
+            if (*c == '/' || *c == '\\') {
+                base = c + 1;
+            }
+        }
+        for (c = base; c != NULL && *c && *c != '-' && c - base < 8; c++) {
+            tex = tex * 16 + (uint32_t)(*c <= '9' ? *c - '0' : (*c | 32) - 'a' + 10);
+        }
+        for (q = 0; q < rsCount && rs[q].tex != tex; q++) {}
+        if (q == rsCount && rsCount < 48) {
+            memset(&rs[q], 0, sizeof(rs[q]));
+            rs[q].tex = tex;
+            rsCount++;
+        }
+        if (q < rsCount && layer == 1) {
+            float lx = consts[40], ly = consts[44], lz = consts[48], lw = consts[52];
+            for (n = 0; n < count; n++) {
+                const float *nv = &vertices[n * 12 + 4];
+                float wx = consts[0] * nv[0] + consts[4] * nv[1] + consts[8] * nv[2];
+                float wy = consts[1] * nv[0] + consts[5] * nv[1] + consts[9] * nv[2];
+                float wz = consts[2] * nv[0] + consts[6] * nv[1] + consts[10] * nv[2];
+                float r = (lx * wx + ly * wy + lz * wz + lw) * 0.5f + 0.5f;
+                int b = (int)(r * 20.0f);
+                r = r < 0.0f ? 0.0f : r > 1.0f ? 1.0f : r;
+                b = b < 0 ? 0 : b > 19 ? 19 : b;
+                rs[q].hist[b]++;
+                rs[q].n++;
+                rs[q].lit += ((r - (rampEdge + rampDir * sAnimeStrip.cut[form])) * -rampDir) >= 0.0f;
+            }
+            rs[q].lw += lw;
+            rs[q].lwN++;
+            rs[q].edge = rampEdge + rampDir * sAnimeStrip.cut[form];
+        }
+        if (gGsFrame >= rsFrame + 600) {
+            rsFrame = gGsFrame;
+            for (q = 0; q < rsCount; q++) {
+                unsigned acc = 0, b, p10 = 0, p50 = 0, p90 = 0;
+                if (rs[q].n == 0) {
+                    continue;
+                }
+                for (b = 0; b < 20; b++) {
+                    acc += rs[q].hist[b];
+                    if (!p10 && acc * 10 >= rs[q].n) p10 = b + 1;
+                    if (!p50 && acc * 2 >= rs[q].n) p50 = b + 1;
+                    if (!p90 && acc * 10 >= rs[q].n * 9) p90 = b + 1;
+                }
+                fprintf(stderr, "anime: rstat %08x edge %.2f lit %.0f%% r p10 %.2f p50 %.2f p90 %.2f light.w %.3f (%u points)\n", rs[q].tex,
+                        rs[q].edge, 100.0 * rs[q].lit / rs[q].n, p10 * 0.05, p50 * 0.05, p90 * 0.05, rs[q].lwN ? rs[q].lw / rs[q].lwN : 0.0, rs[q].n);
+                memset(&rs[q], 0, sizeof(rs[q]));
+            }
+            rsCount = 0;
+        }
+    }    if ((layer == 1 || layer == 5 || layer == 3) && rampDir != 0.0f && form >= 0 && Mods_Look()->shading > 0 &&
         gsDrawCount < MAX_DRAWS && gsVuUniCount < MAX_VU_UNIFORMS) {
         GsDraw a = d;
         Vu0Uniform au = u;
