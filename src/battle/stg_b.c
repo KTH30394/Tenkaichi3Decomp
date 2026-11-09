@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "common.h"
 
 /*
@@ -1713,5 +1714,10 @@ void StgFog_SetParams(StgFogParams *prm) {
         Vec4_Set(&gStgFog->pt[1].v, pt[2], 0.0f, pt[3], 1.0f);
         Vec4_Set(&gStgFog->pt[2].v, pt[4], 0.0f, pt[5], 1.0f);
     }
+#ifdef PORT
+    /* (the distance blur's strength: its curve, depth byte -> blur, for comparing the games) */
+    fprintf(stderr, "bt3: distance blur curve %s: %.0f,%.0f %.0f,%.0f %.0f,%.0f clearLast %d\n", prm == NULL ? "default" : "stage",
+            gStgFog->pt[0].v.x, gStgFog->pt[0].v.z, gStgFog->pt[1].v.x, gStgFog->pt[1].v.z, gStgFog->pt[2].v.x, gStgFog->pt[2].v.z, gStgFog->clearLast);
+#endif
     StgFog_BuildClut(gStgFog, gStgFog->pt, gStgFog->clearLast, 1.0f);
 }
