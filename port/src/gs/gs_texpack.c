@@ -77,6 +77,8 @@ typedef struct AnimeFolder {
     uint64_t *up;      /* anime_up.txt: strips (their texture coordinates' hash, gs_draw.c) split up and down */
     int upCount;
     int view;          /* anime_view.txt: 1 / -1 across the picture, 2 / -2 up and down it, the sign the side; 0 = none */
+    int *models;       /* anime_models.txt: the fighter models (file ids) the folder is for; none = any (TexPack_AnimeFolderAllows) */
+    int modelCount, hasModels;
 } AnimeFolder;
 
 /* A file of texture hashes, one a line (hexadecimal; anything after it ignored). 1 = it is there. */
@@ -144,6 +146,21 @@ static int folder_of(const char *dir) {
     read_hashes(path, &a->gloss, &a->glossCount);
     snprintf(path, sizeof(path), "%sanime_up.txt", dir);
     read_hashes(path, &a->up, &a->upCount);
+    snprintf(path, sizeof(path), "%sanime_models.txt", dir);
+    f = fopen(path, "r");
+    if (f != NULL) {
+        char line[256];
+        a->hasModels = 1;
+        while (fgets(line, sizeof(line), f) != NULL) {
+            char *end;
+            long v = strtol(line, &end, 10);
+            if (end != line && v > 0) {
+                a->models = realloc(a->models, (size_t)(a->modelCount + 1) * sizeof(int));
+                a->models[a->modelCount++] = (int)v;
+            }
+        }
+        fclose(f);
+    }
     snprintf(path, sizeof(path), "%sanime_view.txt", dir);
     f = fopen(path, "r");
     if (f != NULL) {
@@ -607,6 +624,32 @@ uint64_t TexPack_LastTex(void) {
 
 int TexPack_AnimeFolder(int id) {
     return id >= 0 && (uint32_t)id < sCount && sEntries[id].anime ? sEntries[id].folder : -1;
+}
+
+/* Whether a folder's colours are for the fighter whose model is file `model` (-1 = not known): yes without an
+   anime_models.txt; with one, only for the models listed (a shared piece of another fighter takes nothing). */
+int TexPack_AnimeFolderAllows(int folder, int model) {
+    int k;
+    if (folder < 0 || folder >= sFolderCount || !sFolders[folder].hasModels) {
+        return 1;
+    }
+    for (k = 0; k < sFolders[folder].modelCount; k++) {
+        if (sFolders[folder].models[k] == model) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 1 = some folder has an anime_models.txt (the decoded textures then depend on which models the fighters have) */
+int TexPack_AnimeAnyModels(void) {
+    int f;
+    for (f = 0; f < sFolderCount; f++) {
+        if (sFolders[f].hasModels) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int TexPack_AnimeFolderIsForm(int folder) {

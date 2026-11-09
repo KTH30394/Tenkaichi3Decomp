@@ -260,6 +260,37 @@ void File_InitRequests(void) {
 }
 
 /* Reads a whole file and waits for it; opens by name when id < 0, allocates the buffer when buf is NULL. */
+#ifdef PORT
+/* Which file is where: the buffers files were read into (their ids), so a model being bound can say which file it is
+   (BtlObjMdl_BindFiles -> Port_AnimeRowModel: anime_models.txt in the texture pack). */
+static struct { const u8 *at; s32 bytes, id; } sFileAt[64];
+static u32 sFileAtNext;
+static void Port_FileNote(const void *buf, s32 bytes, s32 id) {
+    u32 i;
+    for (i = 0; i < 64; i++) {
+        if (sFileAt[i].at == (const u8 *)buf) {
+            sFileAt[i].bytes = bytes;
+            sFileAt[i].id = id;
+            return;
+        }
+    }
+    i = sFileAtNext++ & 63;
+    sFileAt[i].at = buf;
+    sFileAt[i].bytes = bytes;
+    sFileAt[i].id = id;
+}
+/* the id of the file whose buffer holds `p`, -1 = none known */
+int Port_FileIdAt(const void *p) {
+    u32 i;
+    for (i = 0; i < 64; i++) {
+        if (sFileAt[i].at != NULL && (const u8 *)p >= sFileAt[i].at && (const u8 *)p < sFileAt[i].at + sFileAt[i].bytes) {
+            return sFileAt[i].id;
+        }
+    }
+    return -1;
+}
+#endif
+
 void *File_LoadSyncEx(s32 id, char *name, void *buf, s32 unused) {
     ADXF adxf;
     s32 sectors;
@@ -284,6 +315,9 @@ void *File_LoadSyncEx(s32 id, char *name, void *buf, s32 unused) {
         ADXM_ExecMain();
     } while (ADXF_GetStat(adxf) != ADXF_STAT_READEND);
     ADXF_Close(adxf);
+#ifdef PORT
+    if (id >= 0) Port_FileNote(dst, sectors * FILE_SECTOR_SIZE, id);
+#endif
     buf = dst;
     return buf;
 }
@@ -340,6 +374,9 @@ void *File_Request(s32 id, void *buf) {
         flags = FILE_REQ_OWNS_BUF;
     }
     ADXF_Close(adxf);
+#ifdef PORT
+    Port_FileNote(dst, sectors * FILE_SECTOR_SIZE, id);
+#endif
 
     req = (FileReq *)List_PopFront(&queue->free);
     req->flags = flags;

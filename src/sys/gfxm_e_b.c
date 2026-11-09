@@ -192,6 +192,13 @@ void BtlObjMdl_BindFiles(ObjMdlObj *obj) {
         Res_RelocateOffsets(&obj->mdl.tex, (u8 *)mdl->texFile, mdl->texFile);
         BtlObjVis_AllocBit(mdl->model->alphaRow);
     }
+#ifdef PORT
+    { /* the texture pack's anime_models.txt: which model file this row now has (port/src/gs/gs_draw.c) */
+        extern int Port_FileIdAt(const void *p);
+        extern void Port_AnimeRowModel(int row, int model);
+        Port_AnimeRowModel(mdl->model->alphaRow, Port_FileIdAt(mdl->file));
+    }
+#endif
 }
 
 /* Takes one part from the pool for every mesh record and remembers the first part of each node. */

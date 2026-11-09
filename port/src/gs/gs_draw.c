@@ -258,6 +258,8 @@ typedef struct Tex {
     int animeCount;
     int arow;                /* a fighter's texture: the row of the alpha table its palette has (BtlObjMdl_InitAlphaSlots
                                 writes slot + row * 15 into its alpha: each fighter on the screen its own row); -1 = none */
+    int mrow, mmodel;        /* (anime_models.txt) the row the texture's pixels have and the model that row had when it was
+                                made: with another model in that row since, it is made again (anime_tex_current) */
     uint64_t markForms;      /* the form folders this texture marks (TexPack_AnimeFoldersMarking), a bit each */
     uint32_t rampHash;       /* a shading ramp: its colours as they are, a little rounded */
     int rampFlat;            /* and all one tone (an outline shell's): no anime pass over it */
@@ -1097,6 +1099,51 @@ static int anime_table(int folder) {
    1 = *img holds them (twice the height, freed by the caller) and *entry the file whose strips' settings they take. */
 static int anime_form_usable(int folder); /* (below, with the forms seen) */
 
+/* Which model each fighter has: a model is given its row of the alpha table when it is bound (BtlObjMdl_BindFiles,
+   src/sys/gfxm_e_b.c), and its textures carry that row in their palette's alpha (slot + row * 15). The file id of the
+   model goes with the row here, so a folder with an anime_models.txt colours only the models it lists: another
+   fighter with a piece of the same texture (the BT4 shares many of BT3's) takes nothing from it. sAnimeModelsGen
+   changes with the models, and with it the decoded textures (a texture of the same row, now another fighter's). */
+static int sRowModel[64]; /* the model file id + 1; 0 = not known */
+static uint32_t sAnimeModelsGen;
+void Port_AnimeRowModel(int row, int model) {
+    if (row >= 0 && row < 64 && sRowModel[row] != model + 1) {
+        sRowModel[row] = model + 1;
+        sAnimeModelsGen = sAnimeModelsGen * 16777619u + (uint32_t)row * 0x9E3779B1u + (uint32_t)model;
+        if (getenv("BT3_ANIME_LOG") != NULL || getenv("BT3_MODEL_LOG") != NULL) {
+            fprintf(stderr, "anime: alpha row %d is model file %d\n", row, model);
+        }
+    }
+}
+static int anime_row_model(int row) {
+    return row >= 0 && row < 64 ? sRowModel[row] - 1 : -1;
+}
+/* a folder whose colours this fighter (its row; -1 = not known) may have */
+static int anime_folder_ok(int folder, int row) {
+    return TexPack_AnimeFolderAllows(folder, anime_row_model(row));
+}
+static int sDeriveRow = -1; /* (anime_derive) the row of the texture being made */
+/* (anime_models.txt) a decoded texture still right: its row has the model it was made for. Else it is let go (its
+   key no longer matches: never found again) and made anew for the fighter now in that row. */
+static int anime_tex_current(Tex *c) {
+    if (c->mrow < 0 || anime_row_model(c->mrow) == c->mmodel) {
+        return 1;
+    }
+    c->gen ^= 0xA5A5A5A5u;
+    return 0;
+}
+/* the row of a fighter's texture: the alpha of its first texel of one of the first 16 palette entries (slot + row * 15,
+   BtlObjMdl_InitAlphaSlots), -1 = none */
+static int anime_px_row(const uint32_t *px, uint32_t n) {
+    uint32_t i;
+    for (i = 0; px != NULL && i < n; i++) {
+        if ((px[i] >> 24) < 0x80) {
+            return (int)((px[i] >> 24) / 15);
+        }
+    }
+    return -1;
+}
+
 /* (anime_derive) two colours (0xRRGGBB) not of one kind: one with colour and the other grey or white (an iris and the
    white of the eye), or both with colour and hues more than 40 degrees apart (an iris and the skin). Dark ones are not
    told apart (lines). */
@@ -1277,7 +1324,7 @@ static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, ui
         }
         for (rr = 0; rr < 8 && i == w * h; rr++) {
             int folder = sAnimeRecent[rr].folder - 1, ids[64], ne, e;
-            if (folder < 0 || sAnimeRecent[rr].frame + 10 < gGsFrame || !anime_form_usable(folder)) {
+            if (folder < 0 || sAnimeRecent[rr].frame + 10 < gGsFrame || !anime_form_usable(folder) || !anime_folder_ok(folder, sDeriveRow)) {
                 continue;
             }
             ne = TexPack_AnimeFolderEntries(folder, ids, 64);
@@ -1447,7 +1494,7 @@ static int anime_derive_try(uint64_t texHash, const uint32_t *px, uint32_t w, ui
     for (r = 0; r < 8; r++) {
         int t, folder = sAnimeRecent[r].folder - 1, q;
         uint32_t hits = 0;
-        if (folder < 0 || sAnimeRecent[r].frame + 10 < gGsFrame || !anime_form_usable(folder) ||
+        if (folder < 0 || sAnimeRecent[r].frame + 10 < gGsFrame || !anime_form_usable(folder) || !anime_folder_ok(folder, sDeriveRow) ||
             !anime_alpha_same(folder, px, w * h) || (t = anime_table(folder)) < 0) {
             continue;
         }
@@ -1684,7 +1731,7 @@ static GsTex texture_get(int ctx) {
     if (sTexPackOn && TexPack_Count() != 0) {
         gen ^= 0x5BD1E995u; /* with the pack and without it are different textures: switching it takes effect at once */
     }
-    if (sLast != NULL && sLast->tex0 == t0 && sLast->texa == texa && sLast->gen == gen) {
+    if (sLast != NULL && sLast->tex0 == t0 && sLast->texa == texa && sLast->gen == gen && anime_tex_current(sLast)) {
         if (sLast->pack >= 0 && sLast->last != gGsFrame) {
             pack_arrived(sLast);
         }
@@ -1695,7 +1742,7 @@ static GsTex texture_get(int ctx) {
         uint32_t h = tex_bucket(t0, texa, gen);
         while (sTexBucket[h] != 0) {
             Tex *c = &sTex[sTexBucket[h] - 1];
-            if (c->tex0 == t0 && c->texa == texa && c->gen == gen) {
+            if (c->tex0 == t0 && c->texa == texa && c->gen == gen && anime_tex_current(c)) {
                 if (c->pack >= 0 && c->last != gGsFrame) {
                     pack_arrived(c);
                 }
@@ -1846,6 +1893,16 @@ static GsTex texture_get(int ctx) {
             rh = sh;
         }
     }
+    if (animeFound > 0 && px != NULL && TexPack_AnimeAnyModels()) {
+        /* anime_models.txt: only the folders for this fighter's model */
+        int row = anime_px_row(px, tw * th), k = 0;
+        for (f = 0; f < animeFound; f++) {
+            if (anime_folder_ok(TexPack_AnimeFolder(animeIds[f]), row)) {
+                animeIds[k++] = animeIds[f];
+            }
+        }
+        animeFound = k;
+    }
     for (f = 0; f < animeFound && !replaced && !menuText && px != NULL && rw == tw && rh == th; f++) {
         if (sBackend->texSlotsLeft() > 1) {
             animeTex[animeCount] = anime_texture(animeIds[f], animeOther, px, tw, th, &animeCut[animeCount],
@@ -1862,6 +1919,7 @@ static GsTex texture_get(int ctx) {
         /* no file for it: a face of a fighter on the screen seen only in close-ups gets that fighter's colours (anime_derive) */
         uint8_t *made;
         int entry;
+        sDeriveRow = anime_px_row(px, tw * th);
         if (anime_derive(TexPack_LastTex(), px, tw, th, &made, &entry)) {
             TexPackImage img, held;
             int c = 0;
@@ -1888,6 +1946,14 @@ static GsTex texture_get(int ctx) {
     /* (read here: the pixels go to the back end below, which keeps them) */
     if (sTexPackOn && TexPack_Count() != 0 && !sToonWanted && !replaced && !menuText && TexPack_LastTex() != 0) {
         markForms = TexPack_AnimeFoldersMarking(TexPack_LastTex());
+        if (markForms != 0 && TexPack_AnimeAnyModels()) {
+            int row = anime_px_row(px, px != NULL ? tw * th : 0), fo;
+            for (fo = 0; fo < 64; fo++) {
+                if ((markForms & (1ull << fo)) && !anime_folder_ok(fo, row)) {
+                    markForms &= ~(1ull << fo);
+                }
+            }
+        }
     }
     animeRow = (animeCount != 0 || markForms != 0) && px != NULL && rw == tw && rh == th && (px[0] >> 24) < 0x80 ?
                (int)((px[0] >> 24) / 15) : -1;
@@ -1931,6 +1997,8 @@ static GsTex texture_get(int ctx) {
     t->tex0 = t0;
     t->texa = texa;
     t->gen = gen;
+    t->mrow = TexPack_AnimeAnyModels() && bits <= 8 && px != NULL && rw == tw && rh == th ? anime_px_row(px, tw * th) : -1;
+    t->mmodel = anime_row_model(t->mrow);
     t->last = gGsFrame;
     t->replaced = replaced ? 1 : sharedText ? 3 : menuText ? 2 : 0;
     t->battleText = battleText;

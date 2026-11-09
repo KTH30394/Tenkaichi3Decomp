@@ -53,6 +53,10 @@ uint64_t TexPack_AnimeFoldersMarking(uint64_t tex);
 uint64_t TexPack_LastTex(void); /* the texture hash the last TexPack_Lookup worked out (its name's first part), 0 = none */
 int TexPack_AnimeFolder(int id);
 int TexPack_AnimeFolderIsForm(int folder);
+/* anime_models.txt in a folder: the file ids (decimal, one a line) of the fighter models its colours are for. Without
+   it, any fighter's textures with files there take them, as before. */
+int TexPack_AnimeFolderAllows(int folder, int model);
+int TexPack_AnimeAnyModels(void);
 int TexPack_AnimeIsMarker(int id);
 /* One of the textures listed in its folder's "anime_hair.txt" (hashes, one a line): hair, drawn with a dark line along
    the edge of each lock (gs.frag mode 4). */
