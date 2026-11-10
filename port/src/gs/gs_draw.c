@@ -3675,6 +3675,21 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
                 float wy = consts[1] * nv[0] + consts[5] * nv[1] + consts[9] * nv[2];
                 float wz = consts[2] * nv[0] + consts[6] * nv[1] + consts[10] * nv[2];
                 float r = (lx * wx + ly * wy + lz * wz + lw) * 0.5f + 0.5f;
+                if (viewSide != 0.0f) {
+                    /* (anime_view.txt: r as vu0.vert layer 10 has it, where the surface faces across the picture) */
+                    float fx = consts[56 + 3], fy = consts[56 + 7], fz = consts[56 + 11], fl = sqrtf(fx * fx + fy * fy + fz * fz);
+                    float ax = fabsf(viewSide) > 1.5f ? consts[56 + 1] : consts[56 + 0], ay = fabsf(viewSide) > 1.5f ? consts[56 + 5] : consts[56 + 4],
+                          az = fabsf(viewSide) > 1.5f ? consts[56 + 9] : consts[56 + 8], d, rl, nl = sqrtf(wx * wx + wy * wy + wz * wz);
+                    if (fl > 0.0f && nl > 0.0f) {
+                        fx /= fl; fy /= fl; fz /= fl;
+                        d = ax * fx + ay * fy + az * fz;
+                        ax -= d * fx; ay -= d * fy; az -= d * fz;
+                        rl = sqrtf(ax * ax + ay * ay + az * az);
+                        if (rl > 0.0f) {
+                            r = ((wx * ax + wy * ay + wz * az) / (nl * rl)) * (viewSide > 0.0f ? 1.0f : -1.0f) * 0.5f + 0.5f;
+                        }
+                    }
+                }
                 int b = (int)(r * 20.0f);
                 r = r < 0.0f ? 0.0f : r > 1.0f ? 1.0f : r;
                 b = b < 0 ? 0 : b > 19 ? 19 : b;
